@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // homeDir returns the current user's home directory, or "" if unknown.
@@ -51,6 +52,31 @@ func pathSize(path string) int64 {
 		return nil
 	})
 	return total
+}
+
+// parseFlatYAML does the minimum needed to read simple, non-nested YAML
+// files like GitHub Copilot CLI's workspace.yaml (key: value per line, no
+// lists or nested maps) without pulling in a full YAML library. Quotes
+// around a value are stripped; lines that don't look like "key: value" at
+// zero indentation are ignored.
+func parseFlatYAML(data []byte) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 // removeAll removes every given path (file or directory tree), ignoring

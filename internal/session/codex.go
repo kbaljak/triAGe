@@ -13,10 +13,21 @@ import (
 // on-disk artifact behind "ChatGPT" as a terminal coding agent; the ChatGPT
 // web/desktop apps don't expose local session files at all).
 //
-// Sessions live at ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl. Codex isn't
-// installed on the machine this was built on, so field names are best-effort
-// from the known rollout format; extraction degrades to filename/mtime
-// rather than failing if a line doesn't parse as expected.
+// Sessions live at ~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl
+// — confirmed directly against a real Codex CLI 0.154.0 install. The first
+// line of each file is a "session_meta" event whose payload carries the
+// real session_id (needed for `codex resume <id>` — it's the trailing UUID,
+// not the whole filename) and cwd; user turns are "user_message" events.
+//
+// Codex also gives sessions a human-readable name (auto-assigned, and
+// presumably user-renameable — `codex resume`/`archive`/`delete` all accept
+// "id or session name" per `codex resume --help`), tracked separately in an
+// append-only index at ~/.codex/session_index.jsonl as {id, thread_name,
+// updated_at} — also confirmed directly. That's a much better title source
+// than guessing from the first user message, so it takes priority.
+//
+// Falls back to filename/mtime/first-user-message wherever a file doesn't
+// match this shape, e.g. on an older Codex version without session_index.jsonl.
 type CodexProvider struct {
 	home string // ~/.codex
 }
@@ -33,6 +44,8 @@ func (p *CodexProvider) Detect() bool {
 }
 
 func (p *CodexProvider) ListSessions() ([]Session, error) {
+	names := p.readThreadNames() // session id -> {name, updated_at}, best-effort
+
 	var sessions []Session
 	root := filepath.Join(p.home, "sessions")
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -42,18 +55,32 @@ func (p *CodexProvider) ListSessions() ([]Session, error) {
 		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jsonl") {
 			return nil
 		}
-		title, cwd := extractCodexMeta(path)
-		if title == "" {
-			title = strings.TrimSuffix(info.Name(), ".jsonl")
+		fallbackID := strings.TrimSuffix(info.Name(), ".jsonl")
+		meta := extractCodexMeta(path)
+		id := meta.sessionID
+		if id == "" {
+			id = fallbackID
 		}
+		title := meta.title
+		updated := info.ModTime()
+		if n, ok := names[id]; ok && n.name != "" {
+			title = n.name // Codex's own session name beats a guess from the first message
+			if t := parseAnyTime(n.updatedAt); !t.IsZero() {
+				updated = t
+			}
+		}
+		if title == "" {
+			title = fallbackID
+		}
+		cwd := meta.cwd
 		if cwd == "" {
 			cwd = "(unknown project)"
 		}
 		sessions = append(sessions, Session{
-			ID:        strings.TrimSuffix(info.Name(), ".jsonl"),
+			ID:        id,
 			Title:     title,
 			Project:   cwd,
-			UpdatedAt: info.ModTime(),
+			UpdatedAt: updated,
 			SizeBytes: info.Size(),
 			Paths:     []string{path},
 		})
@@ -65,13 +92,52 @@ func (p *CodexProvider) ListSessions() ([]Session, error) {
 	return sessions, nil
 }
 
+type codexThreadInfo struct {
+	name      string
+	updatedAt string
+}
+
+// readThreadNames parses ~/.codex/session_index.jsonl once per listing: an
+// append-only log of session-id -> friendly-name updates (Codex rewrites
+// the name over a session's life, e.g. auto-naming it and then letting it
+// evolve), so later lines for the same id win. Missing file (older Codex
+// versions) just yields an empty map — callers already fall back cleanly.
+func (p *CodexProvider) readThreadNames() map[string]codexThreadInfo {
+	out := map[string]codexThreadInfo{}
+	f, err := os.Open(filepath.Join(p.home, "session_index.jsonl"))
+	if err != nil {
+		return out
+	}
+	defer f.Close()
+
+	r := bufio.NewReaderSize(f, 64*1024)
+	for {
+		line, readErr := r.ReadString('\n')
+		if len(line) > 0 {
+			var e struct {
+				ID         string `json:"id"`
+				ThreadName string `json:"thread_name"`
+				UpdatedAt  string `json:"updated_at"`
+			}
+			if json.Unmarshal([]byte(line), &e) == nil && e.ID != "" && e.ThreadName != "" {
+				out[e.ID] = codexThreadInfo{name: e.ThreadName, updatedAt: e.UpdatedAt}
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return out
+}
+
 func (p *CodexProvider) DeleteSession(s Session) error {
 	return removeAll(s.Paths)
 }
 
-// ResumeCommand is best-effort like the rest of this provider: `codex resume
-// <id>` is the documented subcommand, but it's unverified since Codex isn't
-// installed on the machine this was built on.
+// ResumeCommand runs `codex resume <session-id-or-name>`, documented at
+// https://learn.chatgpt.com/docs/codex/cli and confirmed independently via
+// GitHub discussions/issues on openai/codex. Unverified end-to-end since
+// Codex isn't installed on the machine this was built on.
 func (p *CodexProvider) ResumeCommand(s Session) ([]string, string, error) {
 	dir := s.Project
 	if !dirExists(dir) {
@@ -80,56 +146,80 @@ func (p *CodexProvider) ResumeCommand(s Session) ([]string, string, error) {
 	return []string{"codex", "resume", s.ID}, dir, nil
 }
 
-func extractCodexMeta(path string) (title, cwd string) {
+type codexMeta struct {
+	sessionID string
+	cwd       string
+	title     string
+}
+
+// codexEnvelope is the outer shape of every rollout line: {"type":...,
+// "item":{...}} in current Codex CLI versions, but some released versions
+// used "payload" for the same wrapper — accept either rather than betting
+// on one, consistent with how the rest of this provider degrades gracefully.
+type codexEnvelope struct {
+	Type    string          `json:"type"`
+	Item    json.RawMessage `json:"item"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+func (e codexEnvelope) data() json.RawMessage {
+	if len(e.Item) > 0 {
+		return e.Item
+	}
+	return e.Payload
+}
+
+// extractCodexMeta streams a rollout file (never loading it fully — these
+// can grow large over a long session) looking for the session_meta event
+// (session_id, cwd) and the first user_message event (for a title fallback,
+// since Codex rollouts carry no title/summary field of their own).
+func extractCodexMeta(path string) codexMeta {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", ""
+		return codexMeta{}
 	}
 	defer f.Close()
 
+	var meta codexMeta
 	r := bufio.NewReaderSize(f, 64*1024)
 	for {
 		line, readErr := r.ReadString('\n')
 		if len(line) > 0 {
-			switch {
-			case cwd == "" && strings.Contains(line, `"cwd":"`):
-				var m struct {
-					Payload struct {
-						Cwd string `json:"cwd"`
-					} `json:"payload"`
-					Cwd string `json:"cwd"`
-				}
-				if json.Unmarshal([]byte(line), &m) == nil {
-					if m.Payload.Cwd != "" {
-						cwd = m.Payload.Cwd
-					} else {
-						cwd = m.Cwd
+			var env codexEnvelope
+			if json.Unmarshal([]byte(line), &env) == nil {
+				switch env.Type {
+				case "session_meta":
+					var m struct {
+						SessionID string `json:"session_id"`
+						ID        string `json:"id"`
+						Cwd       string `json:"cwd"`
 					}
-				}
-			case title == "" && strings.Contains(line, `"role":"user"`):
-				var m struct {
-					Content string `json:"content"`
-					Text    string `json:"text"`
-				}
-				if json.Unmarshal([]byte(line), &m) == nil {
-					c := m.Content
-					if c == "" {
-						c = m.Text
+					if json.Unmarshal(env.data(), &m) == nil {
+						if m.SessionID != "" {
+							meta.sessionID = m.SessionID
+						} else {
+							meta.sessionID = m.ID
+						}
+						meta.cwd = m.Cwd
 					}
-					c = strings.TrimSpace(c)
-					if len(c) > 70 {
-						c = c[:70] + "…"
+				case "user_message":
+					if meta.title == "" {
+						var m struct {
+							Content string `json:"content"`
+						}
+						if json.Unmarshal(env.data(), &m) == nil {
+							meta.title = cleanFallbackTitle(m.Content)
+						}
 					}
-					title = c
 				}
 			}
 		}
 		if readErr != nil {
 			break
 		}
-		if title != "" && cwd != "" {
+		if meta.sessionID != "" && meta.cwd != "" && meta.title != "" {
 			break
 		}
 	}
-	return title, cwd
+	return meta
 }
