@@ -134,10 +134,10 @@ func (p *CodexProvider) DeleteSession(s Session) error {
 	return removeAll(s.Paths)
 }
 
-// ResumeCommand runs `codex resume <session-id-or-name>`, documented at
-// https://learn.chatgpt.com/docs/codex/cli and confirmed independently via
-// GitHub discussions/issues on openai/codex. Unverified end-to-end since
-// Codex isn't installed on the machine this was built on.
+// ResumeCommand runs `codex resume <session-id-or-name>`, confirmed via
+// `codex resume --help` on a real install and verified to correctly
+// resolve a real session (fails only for lack of a TTY when run headless,
+// not "session not found").
 func (p *CodexProvider) ResumeCommand(s Session) ([]string, string, error) {
 	dir := s.Project
 	if !dirExists(dir) {
