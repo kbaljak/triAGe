@@ -11,5 +11,6 @@ func All() []Provider {
 		NewGeminiProvider(),
 		NewCodexProvider(),
 		NewCopilotProvider(),
+		NewGrokProvider(),
 	}
 }
