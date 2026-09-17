@@ -9,23 +9,32 @@ the ones you don't want.
 
 ## Install
 
-**Go install (fastest, needs a [Go](https://go.dev/dl/) toolchain):**
+**Download a prebuilt binary** from the [Releases page](https://github.com/kbaljak/triAGe/releases) —
+no Go toolchain needed. Pick the archive matching your OS/arch, extract it,
+and put `triage` somewhere on your `PATH`:
+
+```sh
+curl -LO https://github.com/kbaljak/triAGe/releases/latest/download/triage_linux_amd64.tar.gz
+tar -xzf triage_linux_amd64.tar.gz
+install -Dm755 triage ~/.local/bin/triage
+```
+
+(Swap `linux_amd64` for `linux_arm64`, `darwin_amd64`, or `darwin_arm64` to
+match your machine — Apple Silicon Macs want `darwin_arm64`.)
+
+**Or with Go, if you have a [toolchain](https://go.dev/dl/) installed:**
 
 ```sh
 go install github.com/kbaljak/triAGe/cmd/triage@latest
 ```
 
 This installs a `triage` binary to `$(go env GOPATH)/bin` (usually
-`~/go/bin`). Make sure that directory is on your `PATH`, then run:
-
-```sh
-triage
-```
+`~/go/bin`). Make sure that directory is on your `PATH`, then run `triage`.
 
 **From source, with `make`:**
 
 ```sh
-git clone git@github.com:kbaljak/triAGe.git
+git clone https://github.com/kbaljak/triAGe.git
 cd triAGe
 make build     # -> ./triage
 make install   # installs to ~/.local/bin (override with PREFIX=...)
@@ -38,7 +47,7 @@ below.
 **From source, without `make`:**
 
 ```sh
-git clone git@github.com:kbaljak/triAGe.git
+git clone https://github.com/kbaljak/triAGe.git
 cd triAGe
 ./build.sh          # -> ./triage
 ./build.sh run       # build + run immediately

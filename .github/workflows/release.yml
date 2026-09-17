@@ -1,0 +1,51 @@
+name: Release
+
+# Builds a static triage binary for each OS/arch below and attaches it to a
+# GitHub Release whenever a version tag (v1.2.3) is pushed. Each matrix leg
+# builds and uploads independently, appending its own archive to the same
+# (auto-created) release.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o dist/triage ./cmd/triage
+          tar -C dist -czf "triage_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" triage
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: triage_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+          generate_release_notes: true
