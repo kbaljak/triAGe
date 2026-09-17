@@ -1,6 +1,6 @@
 # triAGe
 
-*(the "AG" is capitalized on purpose — it's short for "agent")*
+*(the "AG" is short for "agent")*
 
 A terminal GUI for browsing, resuming, and cleaning up local session history
 left behind by AI coding agent CLIs. Pick an agent, see every session it has
@@ -9,55 +9,33 @@ the ones you don't want.
 
 ## Install
 
-**Download a prebuilt binary** from the [Releases page](https://github.com/kbaljak/triAGe/releases) —
-no Go toolchain needed. Pick the archive matching your OS/arch, extract it,
-and put `triage` somewhere on your `PATH`:
+### Prebuilt binary
+**Download a prebuilt binary** from the [releases page](https://github.com/kbaljak/triAGe/releases). 
+
+Pick the archive matching your OS/arch, extract it,
+and install **triage** in *~/.local/bin/*
+
+
+(Swap `linux_amd64` for `linux_arm64`, `darwin_amd64`, or `darwin_arm64` according to your needs.)
 
 ```sh
 curl -LO https://github.com/kbaljak/triAGe/releases/latest/download/triage_linux_amd64.tar.gz
 tar -xzf triage_linux_amd64.tar.gz
 install -Dm755 triage ~/.local/bin/triage
 ```
-
-(Swap `linux_amd64` for `linux_arm64`, `darwin_amd64`, or `darwin_arm64` to
-match your machine — Apple Silicon Macs want `darwin_arm64`.)
-
-**Or with Go, if you have a [toolchain](https://go.dev/dl/) installed:**
-
+### Using Go
 ```sh
 go install github.com/kbaljak/triAGe/cmd/triage@latest
 ```
 
-This installs a `triage` binary to `$(go env GOPATH)/bin` (usually
-`~/go/bin`). Make sure that directory is on your `PATH`, then run `triage`.
+This installs `triage` binary to `~/go/bin`. Make sure that directory is on your `PATH`, then run **`triage`**.
 
-**From source, with `make`:**
-
+### From source using make
 ```sh
 git clone https://github.com/kbaljak/triAGe.git
 cd triAGe
 make build     # -> ./triage
 make install   # installs to ~/.local/bin (override with PREFIX=...)
-```
-
-`make` not installed? `sudo apt install make` (Debian/Ubuntu),
-`brew install make` (macOS), etc. — or use the zero-dependency fallback
-below.
-
-**From source, without `make`:**
-
-```sh
-git clone https://github.com/kbaljak/triAGe.git
-cd triAGe
-./build.sh          # -> ./triage
-./build.sh run       # build + run immediately
-```
-
-**Plain `go build`, either way:**
-
-```sh
-go build -o triage ./cmd/triage
-./triage
 ```
 
 ## Keybindings
@@ -89,60 +67,29 @@ go build -o triage ./cmd/triage
 | `y`, `enter` | Confirm — permanently deletes the file(s), cannot be undone |
 | `n`, `esc` | Cancel |
 
-## Resuming a session
-
-`enter` on a session shells out to that agent's own CLI with whatever flag
-resumes a session by ID, run from the session's original working directory,
-via Bubble Tea's `tea.ExecProcess` (the same suspend-terminal/run/restore
-mechanism apps use to shell out to `$EDITOR`). triAGe's UI is gone from the
-screen for as long as that CLI is running — you're driving the real agent —
-and triAGe reappears (with that agent's session list refreshed) once you
-exit it.
-
-Not every agent supports this yet; see the table below. Pressing `enter` on
-one that doesn't shows a status message rather than doing nothing silently.
-
 ## Supported agents
 
-Session storage formats aren't documented anywhere official, so support
-varies by how much of each was actually inspected on a real machine:
+Claude Code, Antigravity, and Codex are verified against real session data
+and a real install. The rest are implemented from each project's official
+docs (linked below) rather than guesswork, but are unverified end-to-end —
+if you run one of these and something's off, please open an issue with
+what you saw.
 
-| Agent | Sessions | Resume | Where it looks |
-|---|---|---|---|
-| **Claude Code** | Verified against real data | `claude --resume <id>`, confirmed via `claude --help` | `~/.claude/projects/*/*.jsonl` |
-| **Antigravity** | Verified against real data | Not supported — no known CLI-resumable command | `~/.gemini/antigravity-cli/{cache,conversations,annotations,presence,brain}` |
-| **Gemini CLI** | Best-effort, unverified (not installed on the dev machine) | Not supported | `~/.gemini/tmp/*/chats/*.json` |
-| **Codex (OpenAI)** | Best-effort, unverified (not installed on the dev machine) | Best-effort: `codex resume <id>`, also unverified | `~/.codex/sessions/**/*.jsonl` |
-| **GitHub Copilot CLI** | Detected, but exposes no local per-conversation history to list (only process logs and IDE lock files) | N/A (no sessions to resume) | `~/.copilot` |
-
-There's no "ChatGPT" entry: the ChatGPT web/desktop apps don't keep locally
-readable session files. The closest real equivalent — an OpenAI terminal
-coding agent with on-disk sessions — is Codex CLI, listed above.
-
-The "best-effort" providers degrade gracefully: if their assumed file format
-turns out to be wrong, they just find zero sessions (or fall back to
-filename/timestamp for the title) rather than crashing. Delete is always
-`os.RemoveAll` over whatever paths that provider recorded for the session,
-scoped to that agent's own data directory.
-
-## Project layout
-
-```
-cmd/triage/main.go     — entry point (kept in its own dir so `go install`
-                          names the binary "triage" regardless of the
-                          module's own path casing)
-internal/session/       — one file per agent: discovers, lists, resumes,
-                          and deletes its sessions on disk
-internal/ui/            — the Bubble Tea terminal GUI
-```
+| Agent | Where it looks |
+|---|---|
+| **Claude Code** | `~/.claude/projects/*/*.jsonl` |
+| **Antigravity** |`~/.gemini/antigravity-cli/{cache,conversations,annotations,presence,brain}` |
+| **Codex (OpenAI)** |`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, names from `~/.codex/session_index.jsonl` |
+| **Gemini CLI** |`~/.gemini/tmp/<project-hash>/chats/*.json` |
+| **GitHub Copilot CLI** |`~/.copilot/session-state/<id>/` |
+| **Grok Build (xAI)** |`~/.grok/sessions/<encoded-cwd>/<id>/summary.json` |
 
 ## Adding another agent
 
 Implement `session.Provider` (see `internal/session/session.go`) in a new
 file under `internal/session/`, then add it to `session.All()` in
 `internal/session/registry.go`. Also implement `session.Resumable` on it if
-the agent has a real "resume by session ID" CLI command. Nothing in
-`internal/ui` needs to change either way.
+the agent has a real "resume by session ID" CLI command. No change needed to `internal/ui`
 
 ## Development
 
@@ -151,6 +98,8 @@ make test    # go test ./...
 make vet     # go vet ./...
 make fmt     # gofmt -w .
 ```
+
+See [CONTRIBUTING](CONTRIBUTING.md) for the full workflow, step by step.
 
 ## License
 
