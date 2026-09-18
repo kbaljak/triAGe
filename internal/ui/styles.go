@@ -32,6 +32,13 @@ var (
 
 	dialogTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorDanger)
 
+	promptBorderStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorAccent).
+				Padding(1, 3)
+
+	promptTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
+
 	notInstalledStyle = lipgloss.NewStyle().Foreground(colorFaint).Italic(true)
 )
 

@@ -45,6 +45,7 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 |---|---|
 | `↑`/`↓`, `j`/`k` | Move |
 | `enter` | Open the selected agent's sessions |
+| `p` | Set (or clear) a custom config path for the selected agent |
 | `r` | Re-scan every agent |
 | `/` | Filter agents |
 | `q`, `ctrl+c` | Quit |
@@ -67,6 +68,22 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 | `y`, `enter` | Confirm — permanently deletes the file(s), cannot be undone |
 | `n`, `esc` | Cancel |
 
+## Agents installed somewhere nonstandard
+
+triAGe looks for each agent at its usual default location. If an agent
+isn't found there — including if none are found at all on first run —
+its row in the agent list shows "not detected" instead of a session count.
+Highlight it and press `p` to type in the actual path to its config
+directory (the same directory it would otherwise look for by default, e.g.
+`~/.claude` for Claude Code); leaving the prompt empty and pressing enter
+clears a path you'd previously set, reverting to the default. This works
+for any agent, not just undetected ones — useful if you want to point at a
+different install than the default.
+
+Paths are saved to a config file (`os.UserConfigDir()/triage/config.json` —
+typically `~/.config/triage/config.json` on Linux) and reused on the next
+launch.
+
 ## Supported agents
 
 Claude Code, Antigravity, and Codex are verified against real session data.
@@ -87,8 +104,10 @@ something's off, please open an issue with what you saw.
 
 Implement `session.Provider` (see `internal/session/session.go`) in a new
 file under `internal/session/`, then add it to `session.All()` in
-`internal/session/registry.go`. Also implement `session.Resumable` on it if
-the agent has a real "resume by session ID" CLI command. No change needed to `internal/ui`
+`internal/session/registry.go` (use `resolveHome` from `util.go` so it
+supports a custom-path override like every other provider). Also implement
+`session.Resumable` on it if the agent has a real "resume by session ID"
+CLI command. No change needed to `internal/ui`.
 
 ## Development
 

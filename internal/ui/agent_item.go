@@ -11,9 +11,12 @@ import (
 	"github.com/kbaljak/triAGe/internal/session"
 )
 
-// agentItem is one row in the top-level agent list.
+// agentItem is one row in the top-level agent list. Every known provider
+// gets a row regardless of detected, so an agent installed somewhere
+// nonstandard can still be selected and given a custom path.
 type agentItem struct {
 	provider     session.Provider
+	detected     bool
 	sessionCount int
 	totalSize    int64
 	loadErr      error
@@ -37,6 +40,9 @@ func (d agentDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 
 	nameStyle := lipgloss.NewStyle().Bold(true)
 	metaStyle := lipgloss.NewStyle().Foreground(colorSubtle)
+	if !it.detected {
+		nameStyle = notInstalledStyle
+	}
 	if selected {
 		nameStyle = nameStyle.Foreground(colorAccent)
 	}
@@ -48,6 +54,8 @@ func (d agentDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 
 	var meta string
 	switch {
+	case !it.detected:
+		meta = notInstalledStyle.Render("not detected — press 'p' to set a custom path")
 	case it.loadErr != nil:
 		meta = errorStyle.Render("error: " + it.loadErr.Error())
 	case it.sessionCount == 0:

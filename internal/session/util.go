@@ -15,6 +15,16 @@ func homeDir() string {
 	return h
 }
 
+// resolveHome returns override if non-empty (a user-supplied path replacing
+// an agent's default config directory), otherwise the default built from
+// the home directory plus the given path segments.
+func resolveHome(override string, defaultSegments ...string) string {
+	if override != "" {
+		return override
+	}
+	return filepath.Join(append([]string{homeDir()}, defaultSegments...)...)
+}
+
 // dirExists reports whether path exists and is a directory.
 func dirExists(path string) bool {
 	if path == "" {

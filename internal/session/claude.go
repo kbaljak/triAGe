@@ -18,8 +18,8 @@ type ClaudeProvider struct {
 	home string // ~/.claude
 }
 
-func NewClaudeProvider() *ClaudeProvider {
-	return &ClaudeProvider{home: filepath.Join(homeDir(), ".claude")}
+func NewClaudeProvider(override string) *ClaudeProvider {
+	return &ClaudeProvider{home: resolveHome(override, ".claude")}
 }
 
 func (p *ClaudeProvider) ID() string   { return "claude" }

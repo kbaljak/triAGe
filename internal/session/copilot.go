@@ -22,8 +22,8 @@ type CopilotProvider struct {
 	home string // ~/.copilot
 }
 
-func NewCopilotProvider() *CopilotProvider {
-	return &CopilotProvider{home: filepath.Join(homeDir(), ".copilot")}
+func NewCopilotProvider(override string) *CopilotProvider {
+	return &CopilotProvider{home: resolveHome(override, ".copilot")}
 }
 
 func (p *CopilotProvider) ID() string   { return "copilot" }
