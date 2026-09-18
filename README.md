@@ -68,23 +68,20 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 Type a query combining an optional age constraint and an optional regex,
 space-separated in either order:
 
-- `days>N` — only sessions **older** than N days (by last-activity time)
-- `days<N` — only sessions **newer** than N days
-- anything else — a real (RE2) regex, case-insensitive, matched against the
-  session **title only** — not the project path, so an incidental letter
-  in your home directory (e.g. from your username) can't make an unrelated
-  pattern match every session. Use `/` if you want to search by project.
+- `days>N` — sessions N days old or older
+- `days<N` — sessions newer than N days
+- anything else — a case-insensitive regex (RE2 syntax), matched against
+  the session title only (use `/` to search by project instead)
 
-This is regex, not a shell glob — `*` means "zero or more of the character
-right before it," not "anything." `ju*` matches `j`, `ju`, `juu`, … and,
-being unanchored, matches that anywhere in the title — so it'd match a bare
-`j` in a title that has no "ju" in it at all. For "starts with ju, followed
-by anything," use `ju.*` (the `.` means "any character," and the `*`
-repeats *that*).
+Examples:
 
-Examples: `days>30` · `kube.*prod` · `days<7 fix`. Leave it empty and press
-enter to clear. This composes with `/`'s quick search — `/` filters further
-within whatever the advanced filter already narrowed down to.
+- `days>30` — sessions 30 days old or older
+- `kube.*prod` — titles matching the regex `kube.*prod`
+- `days<7 fix` — sessions newer than 7 days, with "fix" in the title
+
+Leave it empty and press enter to clear. This composes with `/`'s quick
+search — `/` filters further within whatever the advanced filter already
+narrowed down to.
 
 **Delete confirmation**
 | Key | Action |
