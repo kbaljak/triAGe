@@ -117,8 +117,6 @@ make vet     # go vet ./...
 make fmt     # gofmt -w .
 ```
 
-See [CONTRIBUTING](CONTRIBUTING.md) for the full workflow, step by step.
-
 ## License
 
 [MIT](LICENSE)
