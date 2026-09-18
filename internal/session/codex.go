@@ -13,18 +13,16 @@ import (
 // on-disk artifact behind "ChatGPT" as a terminal coding agent; the ChatGPT
 // web/desktop apps don't expose local session files at all).
 //
-// Sessions live at ~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl
-// — confirmed directly against a real Codex CLI 0.154.0 install. The first
-// line of each file is a "session_meta" event whose payload carries the
-// real session_id (needed for `codex resume <id>` — it's the trailing UUID,
-// not the whole filename) and cwd; user turns are "user_message" events.
+// Sessions live at ~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl.
+// The first line of each file is a "session_meta" event whose payload
+// carries the real session_id (needed for `codex resume <id>` — it's the
+// trailing UUID, not the whole filename) and cwd; user turns are
+// "user_message" events.
 //
-// Codex also gives sessions a human-readable name (auto-assigned, and
-// presumably user-renameable — `codex resume`/`archive`/`delete` all accept
-// "id or session name" per `codex resume --help`), tracked separately in an
+// Codex also gives sessions a human-readable name, tracked separately in an
 // append-only index at ~/.codex/session_index.jsonl as {id, thread_name,
-// updated_at} — also confirmed directly. That's a much better title source
-// than guessing from the first user message, so it takes priority.
+// updated_at}. That's a much better title source than guessing from the
+// first user message, so it takes priority.
 //
 // Falls back to filename/mtime/first-user-message wherever a file doesn't
 // match this shape, e.g. on an older Codex version without session_index.jsonl.
@@ -134,10 +132,7 @@ func (p *CodexProvider) DeleteSession(s Session) error {
 	return removeAll(s.Paths)
 }
 
-// ResumeCommand runs `codex resume <session-id-or-name>`, confirmed via
-// `codex resume --help` on a real install and verified to correctly
-// resolve a real session (fails only for lack of a TTY when run headless,
-// not "session not found").
+// ResumeCommand runs `codex resume <session-id-or-name>`.
 func (p *CodexProvider) ResumeCommand(s Session) ([]string, string, error) {
 	dir := s.Project
 	if !dirExists(dir) {
@@ -153,9 +148,8 @@ type codexMeta struct {
 }
 
 // codexEnvelope is the outer shape of every rollout line: {"type":...,
-// "item":{...}} in current Codex CLI versions, but some released versions
-// used "payload" for the same wrapper — accept either rather than betting
-// on one, consistent with how the rest of this provider degrades gracefully.
+// "item":{...}}, though some versions use "payload" for the same wrapper —
+// accept either.
 type codexEnvelope struct {
 	Type    string          `json:"type"`
 	Item    json.RawMessage `json:"item"`

@@ -10,23 +10,13 @@ import (
 // terminal coding agent — distinct from the Grok chatbot, and from
 // unofficial community projects also named "grok-cli").
 //
-// Docs: https://docs.x.ai/build/features/sessions and the source repo's own
-// user guide at
-// https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/17-sessions.md.
 // Sessions live at ~/.grok/sessions/<encoded-cwd>/<session-id>/, each with a
 // summary.json metadata file alongside the actual transcript files
 // (updates.jsonl, chat_history.jsonl, etc.) that make up the rest of the
 // session directory. Resuming is `grok --resume <id-or-title>` — UUID-shaped
 // values are always treated as an ID, anything else matches against titles.
 //
-// summary.json's real shape (confirmed against a real session) differs from
-// what the docs describe: cwd is nested under an "info" object, not
-// top-level. created_at/updated_at/generated_title are top-level as
-// documented. Resume itself is unverified end-to-end.
-//
-// GROK_HOME can relocate the whole ~/.grok tree per the docs; not handled
-// here, consistent with every other provider in this package not honoring
-// hypothetical env var overrides.
+// GROK_HOME can relocate the whole ~/.grok tree; not handled here.
 type GrokProvider struct {
 	home string // ~/.grok
 }
@@ -68,9 +58,7 @@ func (p *GrokProvider) ListSessions() ([]Session, error) {
 			}
 			sessionDir := filepath.Join(cwdPath, sd.Name())
 
-			// Real schema, confirmed against an actual summary.json (the
-			// official docs describe cwd/id as top-level, but they're
-			// actually nested under "info"):
+			// cwd/id are nested under an "info" object here, not top-level:
 			//   {"info":{"id":"...","cwd":"..."},"created_at":"...",
 			//    "updated_at":"...","generated_title":"...",
 			//    "session_summary":"...", ...}
@@ -122,9 +110,7 @@ func (p *GrokProvider) DeleteSession(s Session) error {
 	return removeAll(s.Paths)
 }
 
-// ResumeCommand runs `grok --resume <id>`, per docs.x.ai/build/features/sessions.
-// Unverified end-to-end since Grok Build isn't installed on the machine
-// this was built on.
+// ResumeCommand runs `grok --resume <id>`.
 func (p *GrokProvider) ResumeCommand(s Session) ([]string, string, error) {
 	dir := s.Project
 	if !dirExists(dir) {

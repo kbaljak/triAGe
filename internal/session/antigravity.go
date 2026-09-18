@@ -9,8 +9,8 @@ import (
 )
 
 // AntigravityProvider discovers sessions for Google's Antigravity CLI, which
-// on this machine lives under the Gemini CLI home directory
-// (~/.gemini/antigravity-cli) rather than a directory of its own.
+// nests under the Gemini CLI home directory (~/.gemini/antigravity-cli)
+// rather than having a directory of its own.
 //
 // Conversation metadata (title, preview, workspace, timestamps) lives in a
 // single JSON index at cache/conversation_metadata.json; the conversation

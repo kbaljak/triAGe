@@ -83,10 +83,9 @@ func (p *ClaudeProvider) DeleteSession(s Session) error {
 	return removeAll(s.Paths)
 }
 
-// ResumeCommand runs `claude --resume <session-id>` (confirmed via `claude
-// --help`: "-r, --resume [value]  Resume a conversation by session ID"),
-// launched from the session's original working directory so Claude Code
-// finds the same project context it started in.
+// ResumeCommand runs `claude --resume <session-id>`, launched from the
+// session's original working directory so Claude Code finds the same
+// project context it started in.
 func (p *ClaudeProvider) ResumeCommand(s Session) ([]string, string, error) {
 	dir := s.Project
 	if !dirExists(dir) {

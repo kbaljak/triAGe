@@ -7,22 +7,17 @@ import (
 
 // CopilotProvider discovers sessions for GitHub Copilot CLI.
 //
-// Confirmed via official docs (https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle
-// and the CLI reference at
-// https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference):
-// each session gets its own directory under ~/.copilot/session-state/<id>/,
+// Each session gets its own directory under ~/.copilot/session-state/<id>/,
 // holding a workspace.yaml metadata file and an events.jsonl log, indexed by
 // a SQLite database at ~/.copilot/session-store.db. Resuming is `-r` /
-// `--resume <id>` ("resumes a specific session by its unique ID or name").
+// `--resume <id>`.
 //
 // workspace.yaml's exact schema isn't documented, so this reads it with a
 // tiny flat key:value scanner (see parseFlatYAML) and tries a few plausible
 // key names, falling back to directory name/mtime if none match. Deleting a
 // session removes its directory but can't update session-store.db (no
 // SQLite driver in this project) — Copilot CLI re-scans session-state/ on
-// its own, so a stale index entry should self-heal rather than error, but
-// this is unverified since Copilot CLI's local session storage wasn't
-// present yet on the machine this was built on.
+// its own, so a stale index entry should self-heal rather than error.
 type CopilotProvider struct {
 	home string // ~/.copilot
 }
@@ -102,9 +97,7 @@ func (p *CopilotProvider) DeleteSession(s Session) error {
 	return removeAll(s.Paths)
 }
 
-// ResumeCommand runs `copilot --resume <id>`, per the official CLI
-// reference. Unverified end-to-end since Copilot CLI's local session
-// storage wasn't present on the machine this was built on.
+// ResumeCommand runs `copilot --resume <id>`.
 func (p *CopilotProvider) ResumeCommand(s Session) ([]string, string, error) {
 	dir := s.Project
 	if !dirExists(dir) {

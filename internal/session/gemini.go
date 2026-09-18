@@ -11,22 +11,16 @@ import (
 // Antigravity, which is a separate agent that happens to share the same
 // ~/.gemini home directory on machines that have both installed).
 //
-// Confirmed via https://geminicli.com/docs/cli/session-management/ and
-// https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/session-management.md:
-// auto-saved, resumable sessions live at
-// ~/.gemini/tmp/<project-hash>/chats/, and are resumed with
-// `gemini --resume <session-id>`. Gemini CLI's docs describe named
-// "chat checkpoints" (`/chat save <tag>`) as a related but separate
-// feature, resumed with an in-session slash command rather than a launch
-// flag — those aren't handled here since they're not resumable the same
-// way every other session in this app is.
+// Auto-saved, resumable sessions live at ~/.gemini/tmp/<project-hash>/chats/,
+// resumed with `gemini --resume <session-id>`. Gemini CLI also has named
+// "chat checkpoints" (`/chat save <tag>`), resumed with an in-session slash
+// command rather than a launch flag — those aren't handled here since
+// they're not resumable the same way every other session in this app is.
 //
 // Neither the exact JSON filename convention nor the internal schema for
-// entries under chats/ is documented, and the plain Gemini CLI isn't
-// installed on the machine this was built on (only Antigravity, which uses
-// its own antigravity-cli subdirectory of ~/.gemini). So this degrades
-// gracefully — falls back to filename/mtime — if a file's shape doesn't
-// match what's guessed here.
+// entries under chats/ is documented, so this degrades gracefully — falls
+// back to filename/mtime — if a file's shape doesn't match what's guessed
+// here.
 type GeminiProvider struct {
 	home string // ~/.gemini
 }
@@ -73,10 +67,9 @@ func (p *GeminiProvider) ListSessions() ([]Session, error) {
 				continue
 			}
 
-			// The session id `--resume` expects is the filename stem
-			// (docs show `gemini --resume <uuid>`, and every other agent
-			// this app supports names its session files by session id the
-			// same way) — track it separately from the display title.
+			// The session id `--resume` expects is the filename stem —
+			// track it separately from the display title, which may come
+			// from a different field below.
 			id := strings.TrimSuffix(f.Name(), ".json")
 			title := strings.TrimSuffix(strings.TrimPrefix(f.Name(), "checkpoint-"), ".json")
 			if data, err := os.ReadFile(path); err == nil {
@@ -118,10 +111,8 @@ func (p *GeminiProvider) DeleteSession(s Session) error {
 	return removeAll(s.Paths)
 }
 
-// ResumeCommand runs `gemini --resume <session-id>`, confirmed directly in
-// Gemini CLI's own docs (see the package doc comment for links). Best-effort
-// like the rest of this provider: relies on the session id resolved in
-// ListSessions actually being what --resume expects.
+// ResumeCommand runs `gemini --resume <session-id>`. Relies on the session
+// id resolved in ListSessions actually being what --resume expects.
 func (p *GeminiProvider) ResumeCommand(s Session) ([]string, string, error) {
 	return []string{"gemini", "--resume", s.ID}, "", nil
 }

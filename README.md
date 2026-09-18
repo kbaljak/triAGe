@@ -69,11 +69,10 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 
 ## Supported agents
 
-Claude Code, Antigravity, and Codex are verified against real session data
-and a real install. The rest are implemented from each project's official
-docs (linked below) rather than guesswork, but are unverified end-to-end —
-if you run one of these and something's off, please open an issue with
-what you saw.
+Claude Code, Antigravity, and Codex are verified against real session data.
+The rest are implemented from each project's official docs rather than
+guesswork, but are unverified end-to-end — if you run one of these and
+something's off, please open an issue with what you saw.
 
 | Agent | Where it looks |
 |---|---|
