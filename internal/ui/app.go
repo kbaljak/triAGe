@@ -33,6 +33,7 @@ const (
 	viewSessions
 	viewConfirm
 	viewSetPath
+	viewFilter
 )
 
 // confirmTarget describes what a pending delete confirmation would delete.
@@ -50,8 +51,13 @@ type Model struct {
 	agentList   list.Model
 	sessionList list.Model
 
-	active session.Provider // provider currently open in the session view
-	marked map[string]bool  // session ID -> marked, scoped to the active provider
+	active      session.Provider  // provider currently open in the session view
+	allSessions []session.Session // every session for the active provider, unfiltered
+	marked      map[string]bool   // session ID -> marked, scoped to the active provider
+
+	filterQuery string          // the active advanced-filter query, "" if none
+	filterInput textinput.Model // active while state == viewFilter
+	filterError string          // validation message shown under the input
 
 	confirm *confirmTarget
 
@@ -174,14 +180,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirm(msg)
 		case viewSetPath:
 			return m.updateSetPath(msg)
+		case viewFilter:
+			return m.updateFilter(msg)
 		}
 		return m, nil
 	}
 
-	// Anything else (the list's async filter-match results, the filter
-	// input's cursor blink, etc.) still needs to reach whichever list — or
-	// the path text input — is active, or it silently never finishes
-	// applying.
+	// Anything else (the list's async filter-match results, a text input's
+	// cursor blink, etc.) still needs to reach whichever list — or text
+	// input — is active, or it silently never finishes applying.
 	var cmd tea.Cmd
 	switch m.state {
 	case viewAgents:
@@ -190,6 +197,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionList, cmd = m.sessionList.Update(msg)
 	case viewSetPath:
 		m.pathInput, cmd = m.pathInput.Update(msg)
+	case viewFilter:
+		m.filterInput, cmd = m.filterInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -264,6 +273,9 @@ func (m Model) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d", "delete":
 		m.beginDelete()
 		return m, nil
+	case "f":
+		m.beginFilter()
+		return m, nil
 	case "r":
 		if m.active != nil {
 			m.loadSessions(m.active)
@@ -307,11 +319,27 @@ func (m Model) updateSetPath(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.state = m.returnTo
+		return m, nil
+	case "enter":
+		m.submitFilter()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.filterInput, cmd = m.filterInput.Update(msg)
+	m.filterError = ""
+	return m, cmd
+}
+
 // openAgent switches into the session view for the given provider, loading
-// (or reloading) its sessions and clearing any stale marks.
+// (or reloading) its sessions and clearing any stale marks and filter.
 func (m *Model) openAgent(p session.Provider) {
 	m.active = p
 	m.marked = map[string]bool{}
+	m.filterQuery = ""
 	m.loadSessions(p)
 	m.state = viewSessions
 	m.status = ""
@@ -319,14 +347,62 @@ func (m *Model) openAgent(p session.Provider) {
 
 func (m *Model) loadSessions(p session.Provider) {
 	sessions, err := p.ListSessions()
-	items := make([]list.Item, 0, len(sessions))
-	for _, s := range sessions {
-		items = append(items, sessionItem{sess: s, marked: m.marked[s.ID]})
-	}
-	m.sessionList.SetItems(items)
+	m.allSessions = sessions
+	m.applyFilter()
 	if err != nil {
 		m.status = errorStyle.Render("Failed to load sessions: " + err.Error())
 	}
+}
+
+// applyFilter rebuilds the session list's items from m.allSessions,
+// keeping only the ones matching the active filter query (all of them, if
+// there is none), and preserving marks by session ID.
+func (m *Model) applyFilter() {
+	filter, err := parseSessionFilter(m.filterQuery)
+	if err != nil {
+		filter = sessionFilter{} // shouldn't happen: submitFilter already validated it
+	}
+	items := make([]list.Item, 0, len(m.allSessions))
+	for _, s := range m.allSessions {
+		if filter.matches(s) {
+			items = append(items, sessionItem{sess: s, marked: m.marked[s.ID]})
+		}
+	}
+	m.sessionList.SetItems(items)
+}
+
+// beginFilter opens the advanced-filter prompt, pre-filled with the
+// currently active query so it can be tweaked rather than retyped.
+func (m *Model) beginFilter() {
+	ti := textinput.New()
+	ti.Placeholder = "days>7 kubernetes — empty clears"
+	ti.SetValue(m.filterQuery)
+	ti.CursorEnd()
+	ti.Focus()
+	ti.CharLimit = 500
+	ti.Width = 60
+	m.filterInput = ti
+	m.filterError = ""
+	m.returnTo = m.state
+	m.state = viewFilter
+}
+
+// submitFilter validates the query typed into m.filterInput and, if valid,
+// applies it and returns to the session list.
+func (m *Model) submitFilter() {
+	query := strings.TrimSpace(m.filterInput.Value())
+	if _, err := parseSessionFilter(query); err != nil {
+		m.filterError = err.Error()
+		return
+	}
+	m.filterQuery = query
+	m.applyFilter()
+	if query == "" {
+		m.status = "Filter cleared."
+	} else {
+		m.status = fmt.Sprintf("Filter applied: %d of %d session(s) shown.", len(m.sessionList.Items()), len(m.allSessions))
+	}
+	m.state = m.returnTo
 }
 
 // reloadAgents rescans every provider from scratch — including re-checking
@@ -470,12 +546,15 @@ func (m *Model) toggleMark() tea.Cmd {
 }
 
 // beginDelete opens a confirmation dialog for either every marked session,
-// or the highlighted one if nothing is marked.
+// or the highlighted one if nothing is marked. Marks are checked against
+// every session for the active agent, not just what a filter currently
+// shows, so marking something and then filtering it out of view doesn't
+// silently drop it from the delete.
 func (m *Model) beginDelete() {
 	var targets []session.Session
-	for _, it := range m.sessionList.Items() {
-		if si, ok := it.(sessionItem); ok && si.marked {
-			targets = append(targets, si.sess)
+	for _, s := range m.allSessions {
+		if m.marked[s.ID] {
+			targets = append(targets, s)
 		}
 	}
 	if len(targets) == 0 {
@@ -519,6 +598,8 @@ func (m Model) View() string {
 		return m.viewConfirmDialog()
 	case viewSetPath:
 		return m.viewSetPathDialog()
+	case viewFilter:
+		return m.viewFilterDialog()
 	case viewSessions:
 		return m.viewSessions()
 	default:
@@ -539,9 +620,12 @@ func (m Model) viewSessions() string {
 	if m.active != nil {
 		name = m.active.Name() + " sessions"
 	}
+	if m.filterQuery != "" {
+		name += " — filter: " + m.filterQuery
+	}
 	title := brandBar(name)
 	body := m.sessionList.View()
-	help := helpStyle.Render("↑/↓ move · enter resume · space mark · d delete · esc back · r refresh · / filter · q quit")
+	help := helpStyle.Render("↑/↓ move · enter resume · space mark · d delete · f filter · esc back · r refresh · / search · q quit")
 	status := statusBarStyle.Width(max(m.width, 1)).Render(m.status)
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, help, status)
 }
@@ -582,6 +666,23 @@ func (m Model) viewSetPathDialog() string {
 		lines = append(lines, "", errorStyle.Render(m.pathError))
 	}
 	lines = append(lines, "", helpStyle.Render("enter save · esc cancel"))
+
+	dialog := promptBorderStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewFilterDialog() string {
+	lines := []string{
+		promptTitleStyle.Render("Filter sessions"),
+		"",
+		m.filterInput.View(),
+		"",
+		helpStyle.Render("days>N / days<N for age, plus an optional regex — e.g. \"days>7 kube\""),
+	}
+	if m.filterError != "" {
+		lines = append(lines, "", errorStyle.Render(m.filterError))
+	}
+	lines = append(lines, "", helpStyle.Render("enter apply · esc cancel"))
 
 	dialog := promptBorderStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, dialog)
