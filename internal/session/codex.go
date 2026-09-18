@@ -30,8 +30,8 @@ type CodexProvider struct {
 	home string // ~/.codex
 }
 
-func NewCodexProvider() *CodexProvider {
-	return &CodexProvider{home: filepath.Join(homeDir(), ".codex")}
+func NewCodexProvider(override string) *CodexProvider {
+	return &CodexProvider{home: resolveHome(override, ".codex")}
 }
 
 func (p *CodexProvider) ID() string   { return "codex" }

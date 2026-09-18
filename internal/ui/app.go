@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/kbaljak/triAGe/internal/config"
 	"github.com/kbaljak/triAGe/internal/session"
 )
 
@@ -28,6 +32,7 @@ const (
 	viewAgents viewState = iota
 	viewSessions
 	viewConfirm
+	viewSetPath
 )
 
 // confirmTarget describes what a pending delete confirmation would delete.
@@ -38,7 +43,9 @@ type confirmTarget struct {
 // Model is the root Bubble Tea model for triAGe.
 type Model struct {
 	state    viewState
-	returnTo viewState // state to go back to after a confirm dialog
+	returnTo viewState // state to go back to after a confirm/set-path dialog
+
+	cfg config.Config // loaded once at startup, rewritten as paths are set
 
 	agentList   list.Model
 	sessionList list.Model
@@ -47,33 +54,24 @@ type Model struct {
 	marked map[string]bool  // session ID -> marked, scoped to the active provider
 
 	confirm *confirmTarget
-	status  string // transient status line, replaced on the next action
+
+	pathInput      textinput.Model // active while state == viewSetPath
+	pathTargetID   string          // provider ID the path prompt is editing
+	pathTargetName string          // its display name, for the prompt title
+	pathError      string          // validation message shown under the input
+
+	status string // transient status line, replaced on the next action
 
 	width, height int
 }
 
-// New builds the initial model, eagerly scanning every detected provider so
-// the agent list can show session counts right away.
+// New builds the initial model, eagerly scanning every provider (using any
+// custom paths already saved in config) so the agent list can show session
+// counts — and which agents weren't found — right away.
 func New() Model {
-	var items []list.Item
-	for _, p := range session.All() {
-		if !p.Detect() {
-			continue
-		}
-		sessions, err := p.ListSessions()
-		var total int64
-		for _, s := range sessions {
-			total += s.SizeBytes
-		}
-		items = append(items, agentItem{
-			provider:     p,
-			sessionCount: len(sessions),
-			totalSize:    total,
-			loadErr:      err,
-		})
-	}
+	cfg, _ := config.Load() // a missing/unreadable config just means no overrides yet
 
-	agentList := list.New(items, agentDelegate{}, 0, 0)
+	agentList := list.New(buildAgentItems(session.All(cfg.AgentPaths)), agentDelegate{}, 0, 0)
 	agentList.Title = "AI Agents"
 	agentList.SetShowTitle(false) // we draw our own title bar
 	agentList.SetShowStatusBar(false)
@@ -87,12 +85,54 @@ func New() Model {
 	sessionList.SetShowHelp(false)
 	sessionList.SetFilteringEnabled(true)
 
-	return Model{
+	m := Model{
 		state:       viewAgents,
+		cfg:         cfg,
 		agentList:   agentList,
 		sessionList: sessionList,
 		marked:      map[string]bool{},
 	}
+
+	none := true
+	for _, it := range agentList.Items() {
+		if ai, ok := it.(agentItem); ok && ai.detected {
+			none = false
+			break
+		}
+	}
+	if none {
+		m.status = "No agents found automatically. Highlight one and press 'p' to set its config path."
+	}
+	return m
+}
+
+// buildAgentItems scans every given provider and wraps it as a list item,
+// including ones that aren't detected at all — they still need to show up
+// so their path can be set with 'p'.
+func buildAgentItems(providers []session.Provider) []list.Item {
+	items := make([]list.Item, 0, len(providers))
+	for _, p := range providers {
+		detected := p.Detect()
+		var sessionCount int
+		var total int64
+		var loadErr error
+		if detected {
+			sessions, err := p.ListSessions()
+			loadErr = err
+			sessionCount = len(sessions)
+			for _, s := range sessions {
+				total += s.SizeBytes
+			}
+		}
+		items = append(items, agentItem{
+			provider:     p,
+			detected:     detected,
+			sessionCount: sessionCount,
+			totalSize:    total,
+			loadErr:      loadErr,
+		})
+	}
+	return items
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -132,19 +172,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSessions(msg)
 		case viewConfirm:
 			return m.updateConfirm(msg)
+		case viewSetPath:
+			return m.updateSetPath(msg)
 		}
 		return m, nil
 	}
 
 	// Anything else (the list's async filter-match results, the filter
-	// input's cursor blink, etc.) still needs to reach whichever list is
-	// active, or filtering silently never finishes applying.
+	// input's cursor blink, etc.) still needs to reach whichever list — or
+	// the path text input — is active, or it silently never finishes
+	// applying.
 	var cmd tea.Cmd
 	switch m.state {
 	case viewAgents:
 		m.agentList, cmd = m.agentList.Update(msg)
 	case viewSessions:
 		m.sessionList, cmd = m.sessionList.Update(msg)
+	case viewSetPath:
+		m.pathInput, cmd = m.pathInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -174,9 +219,18 @@ func (m Model) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "enter":
-		if it, ok := m.agentList.SelectedItem().(agentItem); ok {
-			m.openAgent(it.provider)
+		it, ok := m.agentList.SelectedItem().(agentItem)
+		if !ok {
+			return m, nil
 		}
+		if !it.detected {
+			m.status = it.provider.Name() + " isn't detected — press 'p' to set its config path."
+			return m, nil
+		}
+		m.openAgent(it.provider)
+		return m, nil
+	case "p":
+		m.beginSetPath()
 		return m, nil
 	case "r":
 		m.reloadAgents()
@@ -238,6 +292,21 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateSetPath(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.state = m.returnTo
+		return m, nil
+	case "enter":
+		m.submitSetPath()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.pathInput, cmd = m.pathInput.Update(msg)
+	m.pathError = ""
+	return m, cmd
+}
+
 // openAgent switches into the session view for the given provider, loading
 // (or reloading) its sessions and clearing any stale marks.
 func (m *Model) openAgent(p session.Provider) {
@@ -260,23 +329,91 @@ func (m *Model) loadSessions(p session.Provider) {
 	}
 }
 
+// reloadAgents rescans every provider from scratch — including re-checking
+// Detect(), so an agent installed (or a path fixed) since the last scan
+// shows up without restarting triAGe.
 func (m *Model) reloadAgents() {
-	items := m.agentList.Items()
-	for i, it := range items {
-		ai, ok := it.(agentItem)
-		if !ok {
-			continue
-		}
-		sessions, err := ai.provider.ListSessions()
-		var total int64
-		for _, s := range sessions {
-			total += s.SizeBytes
-		}
-		ai.sessionCount = len(sessions)
-		ai.totalSize = total
-		ai.loadErr = err
-		m.agentList.SetItem(i, ai)
+	m.agentList.SetItems(buildAgentItems(session.All(m.cfg.AgentPaths)))
+}
+
+// beginSetPath opens the path-input prompt for the highlighted agent,
+// pre-filled with its current (possibly overridden) config directory so the
+// user can tweak it rather than retype it from scratch.
+func (m *Model) beginSetPath() {
+	it, ok := m.agentList.SelectedItem().(agentItem)
+	if !ok {
+		return
 	}
+	m.pathTargetID = it.provider.ID()
+	m.pathTargetName = it.provider.Name()
+	m.pathError = ""
+
+	ti := textinput.New()
+	ti.Placeholder = "e.g. ~/.claude or /custom/path — empty clears the override"
+	ti.SetValue(m.cfg.AgentPaths[m.pathTargetID])
+	ti.CursorEnd()
+	ti.Focus()
+	ti.CharLimit = 4096
+	ti.Width = 60
+	m.pathInput = ti
+
+	m.returnTo = m.state
+	m.state = viewSetPath
+}
+
+// submitSetPath validates and saves the path currently typed into
+// m.pathInput, or — if it's empty — clears any existing override so the
+// agent falls back to its built-in default.
+func (m *Model) submitSetPath() {
+	raw := strings.TrimSpace(m.pathInput.Value())
+
+	if raw == "" {
+		delete(m.cfg.AgentPaths, m.pathTargetID)
+	} else {
+		path := expandHome(raw)
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			m.pathError = "can't find " + path
+			return
+		}
+		if !fi.IsDir() {
+			m.pathError = path + " isn't a directory"
+			return
+		}
+		if m.cfg.AgentPaths == nil {
+			m.cfg.AgentPaths = map[string]string{}
+		}
+		m.cfg.AgentPaths[m.pathTargetID] = path
+	}
+
+	if err := m.cfg.Save(); err != nil {
+		m.pathError = "couldn't save config: " + err.Error()
+		return
+	}
+
+	m.reloadAgents()
+	m.status = "Updated config path for " + m.pathTargetName + "."
+	m.state = m.returnTo
+}
+
+// expandHome expands a leading "~" the way a shell would, since textinput
+// doesn't do this itself and it's the natural way to type a home-relative
+// path.
+func expandHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }
 
 // beginResume hands the terminal over to the active agent's own CLI so the
@@ -380,6 +517,8 @@ func (m Model) View() string {
 	switch m.state {
 	case viewConfirm:
 		return m.viewConfirmDialog()
+	case viewSetPath:
+		return m.viewSetPathDialog()
 	case viewSessions:
 		return m.viewSessions()
 	default:
@@ -390,7 +529,7 @@ func (m Model) View() string {
 func (m Model) viewAgents() string {
 	title := brandBar("AI agents on " + hostname)
 	body := m.agentList.View()
-	help := helpStyle.Render("↑/↓ move · enter open · r refresh · / filter · q quit")
+	help := helpStyle.Render("↑/↓ move · enter open · p set path · r refresh · / filter · q quit")
 	status := statusBarStyle.Width(max(m.width, 1)).Render(m.status)
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, help, status)
 }
@@ -430,5 +569,20 @@ func (m Model) viewConfirmDialog() string {
 			helpStyle.Render("y/enter confirm · n/esc cancel"),
 		),
 	)
+	return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewSetPathDialog() string {
+	lines := []string{
+		promptTitleStyle.Render("Set config path — " + m.pathTargetName),
+		"",
+		m.pathInput.View(),
+	}
+	if m.pathError != "" {
+		lines = append(lines, "", errorStyle.Render(m.pathError))
+	}
+	lines = append(lines, "", helpStyle.Render("enter save · esc cancel"))
+
+	dialog := promptBorderStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, dialog)
 }

@@ -16,13 +16,14 @@ import (
 // session directory. Resuming is `grok --resume <id-or-title>` — UUID-shaped
 // values are always treated as an ID, anything else matches against titles.
 //
-// GROK_HOME can relocate the whole ~/.grok tree; not handled here.
+// GROK_HOME can relocate the whole ~/.grok tree; not read automatically,
+// but the override parameter below covers the same case.
 type GrokProvider struct {
 	home string // ~/.grok
 }
 
-func NewGrokProvider() *GrokProvider {
-	return &GrokProvider{home: filepath.Join(homeDir(), ".grok")}
+func NewGrokProvider(override string) *GrokProvider {
+	return &GrokProvider{home: resolveHome(override, ".grok")}
 }
 
 func (p *GrokProvider) ID() string   { return "grok" }

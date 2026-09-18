@@ -7,7 +7,7 @@ import "testing"
 // test and just checks nothing panics or errors, logging what it found.
 // It intentionally never fails just because an agent isn't installed here.
 func TestProvidersDontCrash(t *testing.T) {
-	for _, p := range All() {
+	for _, p := range All(nil) {
 		p := p
 		t.Run(p.ID(), func(t *testing.T) {
 			if !p.Detect() {

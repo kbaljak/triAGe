@@ -25,8 +25,8 @@ type GeminiProvider struct {
 	home string // ~/.gemini
 }
 
-func NewGeminiProvider() *GeminiProvider {
-	return &GeminiProvider{home: homeDir() + "/.gemini"}
+func NewGeminiProvider(override string) *GeminiProvider {
+	return &GeminiProvider{home: resolveHome(override, ".gemini")}
 }
 
 func (p *GeminiProvider) ID() string   { return "gemini" }

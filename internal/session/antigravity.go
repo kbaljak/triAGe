@@ -20,8 +20,8 @@ type AntigravityProvider struct {
 	home string // ~/.gemini/antigravity-cli
 }
 
-func NewAntigravityProvider() *AntigravityProvider {
-	return &AntigravityProvider{home: filepath.Join(homeDir(), ".gemini", "antigravity-cli")}
+func NewAntigravityProvider(override string) *AntigravityProvider {
+	return &AntigravityProvider{home: resolveHome(override, ".gemini", "antigravity-cli")}
 }
 
 func (p *AntigravityProvider) ID() string   { return "antigravity" }
