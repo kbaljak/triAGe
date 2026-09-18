@@ -70,7 +70,17 @@ space-separated in either order:
 
 - `days>N` — only sessions **older** than N days (by last-activity time)
 - `days<N` — only sessions **newer** than N days
-- anything else — a case-insensitive regex, matched against title + project
+- anything else — a real (RE2) regex, case-insensitive, matched against the
+  session **title only** — not the project path, so an incidental letter
+  in your home directory (e.g. from your username) can't make an unrelated
+  pattern match every session. Use `/` if you want to search by project.
+
+This is regex, not a shell glob — `*` means "zero or more of the character
+right before it," not "anything." `ju*` matches `j`, `ju`, `juu`, … and,
+being unanchored, matches that anywhere in the title — so it'd match a bare
+`j` in a title that has no "ju" in it at all. For "starts with ju, followed
+by anything," use `ju.*` (the `.` means "any character," and the `*`
+repeats *that*).
 
 Examples: `days>30` · `kube.*prod` · `days<7 fix`. Leave it empty and press
 enter to clear. This composes with `/`'s quick search — `/` filters further

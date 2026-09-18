@@ -11,8 +11,7 @@ import (
 )
 
 // sessionFilter is a parsed advanced-filter query: an optional age
-// constraint and/or an optional regex, both applied to Session.Title +
-// Session.Project.
+// constraint and/or an optional regex matched against Session.Title.
 type sessionFilter struct {
 	pattern *regexp.Regexp
 	days    int
@@ -67,7 +66,11 @@ func (f sessionFilter) matches(s session.Session) bool {
 			return false
 		}
 	}
-	if f.pattern != nil && !f.pattern.MatchString(s.Title+" "+s.Project) {
+	// Title only, deliberately: matching the full Project path too would
+	// mean any letter that happens to appear in the home directory (e.g.
+	// from the username) matches almost every session regardless of title
+	// — quick fuzzy search (/) already covers searching by project/repo.
+	if f.pattern != nil && !f.pattern.MatchString(s.Title) {
 		return false
 	}
 	return true

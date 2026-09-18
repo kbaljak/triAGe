@@ -43,6 +43,27 @@ func TestParseSessionFilter(t *testing.T) {
 	}
 }
 
+// TestSessionFilterIgnoresProjectPath locks in a real bug report: matching
+// against the full project path meant a bare letter anywhere in it (e.g.
+// from the username in a home directory) made almost any pattern match
+// almost every session, regardless of title.
+func TestSessionFilterIgnoresProjectPath(t *testing.T) {
+	s := session.Session{Title: "Kubernetes CI/CD utility", Project: "/home/kbaljak/Documents/project"}
+
+	f, err := parseSessionFilter("ju*") // "j" + zero-or-more "u" — matches the "j" in "kbaljak"
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if f.matches(s) {
+		t.Error("pattern matched via the project path, not the title — project should not be searched")
+	}
+
+	jupyter := session.Session{Title: "Jupyter notebook debug", Project: "/home/kbaljak/Documents/project"}
+	if !f.matches(jupyter) {
+		t.Error("expected the pattern to still match a title that actually contains it")
+	}
+}
+
 func TestParseSessionFilterInvalidRegex(t *testing.T) {
 	if _, err := parseSessionFilter("(unclosed"); err == nil {
 		t.Error("expected an error for an invalid regex, got nil")
