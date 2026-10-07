@@ -60,7 +60,7 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 | `f` | Advanced filter — age and/or regex, see below |
 | `r` | Re-scan this agent's sessions |
 | `esc`, `backspace`, `←` | Back to the agent list |
-| `/` | Quick fuzzy search (matches title and project) |
+| `/` | Quick fuzzy search (matches title and project folder name) |
 | `q`, `ctrl+c` | Quit |
 
 **Advanced filter (`f`)**
