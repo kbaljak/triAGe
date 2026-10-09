@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -17,7 +18,14 @@ type sessionItem struct {
 	marked bool
 }
 
-func (i sessionItem) FilterValue() string { return i.sess.Title + " " + i.sess.Project }
+// FilterValue is what `/`'s fuzzy search matches against: the title plus
+// just the project's last path component, not the full absolute path.
+// Fuzzy matching is subsequence-based with no minimum score, so matching
+// the full path let any letter in a parent directory (e.g. the username in
+// the home directory) make unrelated sessions match regardless of title.
+func (i sessionItem) FilterValue() string {
+	return i.sess.Title + " " + filepath.Base(i.sess.Project)
+}
 
 // sessionDelegate renders sessionItem rows: a mark checkbox, title, and a
 // second line with project path, recency and size.

@@ -57,10 +57,31 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 | `enter` | Resume the highlighted session — hands the terminal to the agent's own CLI |
 | `space` | Mark/unmark the highlighted session |
 | `d`, `delete` | Delete — the marked sessions, or the highlighted one if none are marked |
+| `f` | Advanced filter — age and/or regex, see below |
 | `r` | Re-scan this agent's sessions |
 | `esc`, `backspace`, `←` | Back to the agent list |
-| `/` | Filter sessions (matches title and project) |
+| `/` | Quick fuzzy search (matches title and project folder name) |
 | `q`, `ctrl+c` | Quit |
+
+**Advanced filter (`f`)**
+
+Type a query combining an optional age constraint and an optional regex,
+space-separated in either order:
+
+- `days>N` — sessions N days old or older
+- `days<N` — sessions newer than N days
+- anything else — a case-insensitive regex (RE2 syntax), matched against
+  the session title only (use `/` to search by project instead)
+
+Examples:
+
+- `days>30` — sessions 30 days old or older
+- `kube.*prod` — titles matching the regex `kube.*prod`
+- `days<7 fix` — sessions newer than 7 days, with "fix" in the title
+
+Leave it empty and press enter to clear. This composes with `/`'s quick
+search — `/` filters further within whatever the advanced filter already
+narrowed down to.
 
 **Delete confirmation**
 | Key | Action |
