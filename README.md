@@ -164,7 +164,9 @@ supports:
 For the three "best-effort" agents, the name isn't a true rename — it's
 sent to the model as your first message, and only becomes the session's
 displayed title because each provider's own title-extraction already falls
-back to that first message when nothing better exists yet.
+back to that first message when nothing better exists yet. The `n` prompt
+itself is labeled accordingly: "optional first message" instead of
+"optional session name" for these three.
 
 ## Supported agents
 

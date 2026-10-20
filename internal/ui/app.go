@@ -868,12 +868,17 @@ func (m *Model) beginNewSession() {
 	if m.active == nil {
 		return
 	}
-	if _, ok := m.active.(session.NewSessionStarter); !ok {
+	starter, ok := m.active.(session.NewSessionStarter)
+	if !ok {
 		m.status = errorStyle.Render(m.active.Name() + " doesn't support starting a new session from triAGe yet.")
 		return
 	}
 	ti := textinput.New()
-	ti.Placeholder = "optional session name — empty starts an untitled session"
+	if starter.NameIsRename() {
+		ti.Placeholder = "optional session name — empty starts an untitled session"
+	} else {
+		ti.Placeholder = "optional first message — empty starts with no prompt"
+	}
 	ti.Focus()
 	ti.CharLimit = 200
 	ti.Width = 60
@@ -1115,11 +1120,11 @@ func (m Model) viewNewSessionDialog() string {
 	if m.active != nil {
 		title += " — " + m.active.Name()
 	}
-	lines := []string{
-		promptTitleStyle.Render(title),
-		"",
-		m.newSessionInput.View(),
+	lines := []string{promptTitleStyle.Render(title)}
+	if starter, ok := m.active.(session.NewSessionStarter); ok && !starter.NameIsRename() {
+		lines = append(lines, helpStyle.Render("no rename support — this is sent to the agent as its first message"))
 	}
+	lines = append(lines, "", m.newSessionInput.View())
 	if m.newSessionError != "" {
 		lines = append(lines, "", errorStyle.Render(m.newSessionError))
 	}

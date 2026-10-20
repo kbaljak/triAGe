@@ -159,6 +159,9 @@ func (p *CodexProvider) NewSession(name string) ([]string, string, error) {
 	return argv, "", nil
 }
 
+// NameIsRename reports false: the name is sent as the first message, not a rename.
+func (p *CodexProvider) NameIsRename() bool { return false }
+
 type codexMeta struct {
 	sessionID string
 	cwd       string

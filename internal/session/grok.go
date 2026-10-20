@@ -137,3 +137,6 @@ func (p *GrokProvider) NewSession(name string) ([]string, string, error) {
 	}
 	return argv, "", nil
 }
+
+// NameIsRename reports false: the name is sent as the first message, not a rename.
+func (p *GrokProvider) NameIsRename() bool { return false }

@@ -112,6 +112,9 @@ func (p *ClaudeProvider) NewSession(name string) ([]string, string, error) {
 	return argv, "", nil
 }
 
+// NameIsRename reports true: --name is a real rename, never sent to the model.
+func (p *ClaudeProvider) NameIsRename() bool { return true }
+
 // extractClaudeMeta streams a session transcript line by line (never
 // loading the whole file, since transcripts can hold multi-megabyte tool
 // output lines) looking for the most recent AI-generated title and the

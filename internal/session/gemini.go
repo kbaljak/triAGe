@@ -133,3 +133,6 @@ func (p *GeminiProvider) NewSession(name string) ([]string, string, error) {
 	}
 	return argv, "", nil
 }
+
+// NameIsRename reports false: the name is sent as the first message, not a rename.
+func (p *GeminiProvider) NameIsRename() bool { return false }

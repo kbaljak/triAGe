@@ -78,4 +78,10 @@ type NewSessionStarter interface {
 	// directory to start a new interactive session, named name if it's
 	// non-empty, or with no name/initial message at all if it's empty.
 	NewSession(name string) (argv []string, dir string, err error)
+	// NameIsRename reports whether the name given to NewSession becomes a
+	// real session title (true, e.g. Claude Code's --name) or is only sent
+	// to the agent as its first message because the CLI has no rename flag
+	// (false) — the UI needs this to label the name prompt accurately
+	// instead of implying every agent can be cleanly renamed.
+	NameIsRename() bool
 }

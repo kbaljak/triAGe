@@ -36,6 +36,26 @@ func TestNewSessionArgv(t *testing.T) {
 	}
 }
 
+// TestNameIsRename locks in which providers report a true rename vs. a
+// name sent as the session's first message — the UI uses this to label the
+// new-session prompt accurately instead of implying every agent renames.
+func TestNameIsRename(t *testing.T) {
+	cases := []struct {
+		provider NewSessionStarter
+		want     bool
+	}{
+		{NewClaudeProvider(""), true},
+		{NewCodexProvider(""), false},
+		{NewGrokProvider(""), false},
+		{NewGeminiProvider(""), false},
+	}
+	for _, c := range cases {
+		if got := c.provider.NameIsRename(); got != c.want {
+			t.Errorf("%T.NameIsRename() = %v, want %v", c.provider, got, c.want)
+		}
+	}
+}
+
 // TestCopilotAndAntigravityHaveNoNewSession confirms the providers that
 // genuinely can't start a session non-interactively from triAGe correctly
 // don't implement the interface at all, rather than implementing it badly.
