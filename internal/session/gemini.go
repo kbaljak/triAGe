@@ -121,3 +121,15 @@ func (p *GeminiProvider) ResumeCommand(s Session) ([]string, string, error) {
 // HomeEnv reports GEMINI_CLI_HOME, the documented env var Gemini CLI reads
 // to relocate its user-level config/storage root.
 func (p *GeminiProvider) HomeEnv() (string, string) { return "GEMINI_CLI_HOME", p.home }
+
+// NewSession runs `gemini [name]` — confirmed via `gemini --help`:
+// "[query..] Initial prompt. Runs in interactive mode by default". Gemini
+// CLI has no flag to set a session's name at creation, so name is sent as
+// the session's first message instead — not a true rename.
+func (p *GeminiProvider) NewSession(name string) ([]string, string, error) {
+	argv := []string{"gemini"}
+	if name != "" {
+		argv = append(argv, name)
+	}
+	return argv, "", nil
+}

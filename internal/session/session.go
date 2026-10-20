@@ -66,3 +66,16 @@ type EnvHomeProvider interface {
 	// should be set to for this provider instance's own home directory.
 	HomeEnv() (name, value string)
 }
+
+// NewSessionStarter is implemented by providers whose CLI can start a brand
+// new session directly, optionally given a name up front. Where the CLI has
+// a real flag for this (Claude Code's --name), that's a clean rename, never
+// sent to the model. Where it doesn't, the name is passed as the session's
+// initial message instead — not a true rename, but it still ends up as the
+// session's title via that provider's own title-extraction fallback.
+type NewSessionStarter interface {
+	// NewSession returns the argv (argv[0] looked up on PATH) and working
+	// directory to start a new interactive session, named name if it's
+	// non-empty, or with no name/initial message at all if it's empty.
+	NewSession(name string) (argv []string, dir string, err error)
+}

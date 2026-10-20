@@ -37,6 +37,7 @@ const (
 	viewFilter
 	viewProfiles
 	viewNewProfileName
+	viewNewSession
 )
 
 // confirmTarget describes what a pending delete confirmation would delete.
@@ -70,6 +71,9 @@ type Model struct {
 
 	newProfileInput textinput.Model // active while state == viewNewProfileName
 	newProfileError string
+
+	newSessionInput textinput.Model // active while state == viewNewSession
+	newSessionError string
 
 	pathInput        textinput.Model // active while state == viewSetPath
 	pathTargetID     string          // provider ID the path prompt is editing
@@ -206,6 +210,12 @@ type resumeFinishedMsg struct {
 	err          error
 }
 
+// newSessionFinishedMsg arrives after tea.ExecProcess hands control back
+// from a brand-new session started with beginNewSession.
+type newSessionFinishedMsg struct {
+	err error
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -227,6 +237,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case newSessionFinishedMsg:
+		if msg.err != nil {
+			m.status = errorStyle.Render("New session exited with an error: " + msg.err.Error())
+		} else {
+			m.status = "Welcome back."
+		}
+		if m.active != nil {
+			m.loadSessions(m.active) // pick up the session that was just created
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch m.state {
 		case viewAgents:
@@ -241,6 +262,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSetPath(msg)
 		case viewNewProfileName:
 			return m.updateNewProfileName(msg)
+		case viewNewSession:
+			return m.updateNewSession(msg)
 		case viewFilter:
 			return m.updateFilter(msg)
 		}
@@ -262,6 +285,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pathInput, cmd = m.pathInput.Update(msg)
 	case viewNewProfileName:
 		m.newProfileInput, cmd = m.newProfileInput.Update(msg)
+	case viewNewSession:
+		m.newSessionInput, cmd = m.newSessionInput.Update(msg)
 	case viewFilter:
 		m.filterInput, cmd = m.filterInput.Update(msg)
 	}
@@ -396,6 +421,9 @@ func (m Model) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		m.beginFilter()
 		return m, nil
+	case "n":
+		m.beginNewSession()
+		return m, nil
 	case "r":
 		if m.active != nil {
 			m.loadSessions(m.active)
@@ -473,6 +501,20 @@ func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.filterInput, cmd = m.filterInput.Update(msg)
 	m.filterError = ""
+	return m, cmd
+}
+
+func (m Model) updateNewSession(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.state = m.returnTo
+		return m, nil
+	case "enter":
+		return m, m.submitNewSession()
+	}
+	var cmd tea.Cmd
+	m.newSessionInput, cmd = m.newSessionInput.Update(msg)
+	m.newSessionError = ""
 	return m, cmd
 }
 
@@ -820,6 +862,53 @@ func (m *Model) beginResume() tea.Cmd {
 	})
 }
 
+// beginNewSession opens the new-session prompt for the active agent,
+// provided it supports starting a brand-new one from triAGe.
+func (m *Model) beginNewSession() {
+	if m.active == nil {
+		return
+	}
+	if _, ok := m.active.(session.NewSessionStarter); !ok {
+		m.status = errorStyle.Render(m.active.Name() + " doesn't support starting a new session from triAGe yet.")
+		return
+	}
+	ti := textinput.New()
+	ti.Placeholder = "optional session name — empty starts an untitled session"
+	ti.Focus()
+	ti.CharLimit = 200
+	ti.Width = 60
+	m.newSessionInput = ti
+	m.newSessionError = ""
+	m.returnTo = viewSessions
+	m.state = viewNewSession
+}
+
+// submitNewSession starts a brand-new session for the active agent/profile,
+// named whatever was typed into m.newSessionInput (or untitled, if left
+// empty).
+func (m *Model) submitNewSession() tea.Cmd {
+	starter, ok := m.active.(session.NewSessionStarter)
+	if !ok {
+		m.state = m.returnTo
+		return nil
+	}
+	name := strings.TrimSpace(m.newSessionInput.Value())
+	argv, dir, err := starter.NewSession(name)
+	if err != nil {
+		m.newSessionError = err.Error()
+		return nil
+	}
+	cmd, err := m.buildAgentCmd(argv, dir)
+	if err != nil {
+		m.newSessionError = err.Error()
+		return nil
+	}
+	m.state = m.returnTo
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return newSessionFinishedMsg{err: err}
+	})
+}
+
 // buildAgentCmd resolves argv[0] on PATH and builds the *exec.Cmd to run
 // it, scoped to the active provider's own profile via its env var if it has
 // one (EnvHomeProvider) — without that, launching under a non-default
@@ -911,6 +1000,8 @@ func (m Model) View() string {
 		return m.viewSetPathDialog()
 	case viewNewProfileName:
 		return m.viewNewProfileDialog()
+	case viewNewSession:
+		return m.viewNewSessionDialog()
 	case viewFilter:
 		return m.viewFilterDialog()
 	case viewProfiles:
@@ -949,7 +1040,7 @@ func (m Model) viewSessions() string {
 	}
 	title := brandBar(name)
 	body := m.sessionList.View()
-	help := helpStyle.Render("↑/↓ move · enter resume · space mark · d delete · f filter · esc back · r refresh · / search · q quit")
+	help := helpStyle.Render("↑/↓ move · enter resume · n new session · space mark · d delete · f filter · esc back · r refresh · / search · q quit")
 	status := statusBarStyle.Width(max(m.width, 1)).Render(m.status)
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, help, status)
 }
@@ -1014,6 +1105,25 @@ func (m Model) viewNewProfileDialog() string {
 		lines = append(lines, "", errorStyle.Render(m.newProfileError))
 	}
 	lines = append(lines, "", helpStyle.Render("enter continue · esc cancel"))
+
+	dialog := promptBorderStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewNewSessionDialog() string {
+	title := "New session"
+	if m.active != nil {
+		title += " — " + m.active.Name()
+	}
+	lines := []string{
+		promptTitleStyle.Render(title),
+		"",
+		m.newSessionInput.View(),
+	}
+	if m.newSessionError != "" {
+		lines = append(lines, "", errorStyle.Render(m.newSessionError))
+	}
+	lines = append(lines, "", helpStyle.Render("enter start · esc cancel"))
 
 	dialog := promptBorderStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, dialog)

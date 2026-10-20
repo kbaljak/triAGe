@@ -124,3 +124,16 @@ func (p *GrokProvider) ResumeCommand(s Session) ([]string, string, error) {
 // HomeEnv reports GROK_HOME, the env var Grok Build reads to relocate its
 // whole ~/.grok tree.
 func (p *GrokProvider) HomeEnv() (string, string) { return "GROK_HOME", p.home }
+
+// NewSession runs `grok [name]` — confirmed via `grok --help`: "[PROMPT]
+// Initial prompt for the interactive session". Grok has no flag to set a
+// session's name at creation (only --session-id, for its UUID), so name is
+// sent as the session's first message instead — not a true rename, but it
+// still becomes the title via Grok's own generated_title/session_summary.
+func (p *GrokProvider) NewSession(name string) ([]string, string, error) {
+	argv := []string{"grok"}
+	if name != "" {
+		argv = append(argv, name)
+	}
+	return argv, "", nil
+}

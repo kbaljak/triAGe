@@ -67,6 +67,7 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 |---|---|
 | `↑`/`↓`, `j`/`k` | Move |
 | `enter` | Resume the highlighted session — hands the terminal to the agent's own CLI |
+| `n` | Start a brand-new session, optionally named |
 | `space` | Mark/unmark the highlighted session |
 | `d`, `delete` | Delete — the marked sessions, or the highlighted one if none are marked |
 | `f` | Advanced filter — age and/or regex, see below |
@@ -121,14 +122,14 @@ as-is. All of this is saved to a config file
 Creating a profile only creates an empty directory — triAGe has no way to
 (and shouldn't try to) set up real credentials or config in it, since only
 the actual agent CLI can do its own first-run authentication. A brand-new
-profile shows zero sessions until the real CLI has actually run there once
-(e.g. by running it yourself with its config-dir environment variable set
-to the profile's path — see the table below).
+profile shows zero sessions until the real CLI has actually run there once;
+press `n` on its (empty) session list to do that — see "New sessions"
+below.
 
-**Resuming under a non-default profile** sets the real agent CLI's own
-config-directory environment variable before launching it, so it resumes
-against that profile's actual account and data — not whichever one happens
-to be the CLI's own default:
+**Resuming under — or starting a new session in — a non-default profile**
+sets the real agent CLI's own config-directory environment variable before
+launching it, so it runs against that profile's actual account and data —
+not whichever one happens to be the CLI's own default:
 
 | Agent | Env var |
 |---|---|
@@ -138,9 +139,32 @@ to be the CLI's own default:
 | GitHub Copilot CLI | `COPILOT_HOME` |
 | Grok Build (xAI) | `GROK_HOME` |
 
-Antigravity has no such variable and doesn't support resuming from triAGe
-at all — profiles for it only control which directory gets scanned for
-listing.
+Antigravity has no such variable and doesn't support resuming or starting
+sessions from triAGe at all — profiles for it only control which directory
+gets scanned for listing.
+
+## New sessions
+
+`n` on the session list starts a brand-new session with the active
+agent/profile, optionally named. Leave it empty and press enter to start
+untitled.
+
+How the name is actually applied depends on what each agent's CLI
+supports:
+
+| Agent | Supported | How |
+|---|---|---|
+| Claude Code | Yes | `claude --name <name>` — a real rename, never sent to the model |
+| Codex (OpenAI) | Yes, best-effort | No rename flag — sent as the session's first message instead |
+| Gemini CLI | Yes, best-effort | Same — no rename flag, sent as the first message |
+| Grok Build (xAI) | Yes, best-effort | Same — no rename flag, sent as the first message |
+| GitHub Copilot CLI | No | Unverified syntax |
+| Antigravity | No | No CLI-driven session creation |
+
+For the three "best-effort" agents, the name isn't a true rename — it's
+sent to the model as your first message, and only becomes the session's
+displayed title because each provider's own title-extraction already falls
+back to that first message when nothing better exists yet.
 
 ## Supported agents
 
@@ -165,10 +189,11 @@ file under `internal/session/`, then add its ID to `session.IDs` in
 `internal/session/registry.go` (use `resolveHome` from `util.go` so it
 supports a custom-path override like every other provider, and implement
 `Home()` to expose it). Also implement, if the agent's CLI supports them:
-`session.Resumable` (a real "resume by session ID" command), and
+`session.Resumable` (a real "resume by session ID" command),
 `session.EnvHomeProvider` (an environment variable that relocates its
-config directory, so profiles resume correctly). No change needed to
-`internal/ui`.
+config directory, so profiles resume/start correctly), and
+`session.NewSessionStarter` (a way to start a session non-interactively
+seeded with an initial prompt). No change needed to `internal/ui`.
 
 ## Development
 
