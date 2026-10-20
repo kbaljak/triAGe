@@ -99,6 +99,22 @@ func (p *ClaudeProvider) ResumeCommand(s Session) ([]string, string, error) {
 // reads to relocate its entire config directory.
 func (p *ClaudeProvider) HomeEnv() (string, string) { return "CLAUDE_CONFIG_DIR", p.home }
 
+// NewSession runs `claude --name <name>` (or plain `claude` if name is
+// empty) — confirmed via `claude --help`: "-n, --name <name>  Set a display
+// name for this session (shown in the prompt box, /resume picker, and
+// terminal title)". Unlike the other providers' NewSession, this is a real
+// rename, not an initial message sent to the model.
+func (p *ClaudeProvider) NewSession(name string) ([]string, string, error) {
+	argv := []string{"claude"}
+	if name != "" {
+		argv = append(argv, "--name", name)
+	}
+	return argv, "", nil
+}
+
+// NameIsRename reports true: --name is a real rename, never sent to the model.
+func (p *ClaudeProvider) NameIsRename() bool { return true }
+
 // extractClaudeMeta streams a session transcript line by line (never
 // loading the whole file, since transcripts can hold multi-megabyte tool
 // output lines) looking for the most recent AI-generated title and the

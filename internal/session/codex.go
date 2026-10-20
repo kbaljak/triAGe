@@ -146,6 +146,22 @@ func (p *CodexProvider) ResumeCommand(s Session) ([]string, string, error) {
 // relocate its config/state root (config, auth, logs, sessions).
 func (p *CodexProvider) HomeEnv() (string, string) { return "CODEX_HOME", p.home }
 
+// NewSession runs `codex [name]` — confirmed via `codex --help`: "Usage:
+// codex [OPTIONS] [PROMPT]". Codex has no flag to set a session's name at
+// creation, so name is sent as the session's first message instead — not a
+// true rename, but it still becomes the title via Codex's own title
+// extraction (see extractCodexMeta).
+func (p *CodexProvider) NewSession(name string) ([]string, string, error) {
+	argv := []string{"codex"}
+	if name != "" {
+		argv = append(argv, name)
+	}
+	return argv, "", nil
+}
+
+// NameIsRename reports false: the name is sent as the first message, not a rename.
+func (p *CodexProvider) NameIsRename() bool { return false }
+
 type codexMeta struct {
 	sessionID string
 	cwd       string

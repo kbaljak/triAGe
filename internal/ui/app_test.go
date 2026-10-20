@@ -31,11 +31,13 @@ func newTestModel(t *testing.T, agentID string) Model {
 	p := session.NewProvider(agentID, t.TempDir())
 	agentList := list.New([]list.Item{agentItem{provider: p, detected: p.Detect()}}, agentDelegate{}, 80, 20)
 	profileList := list.New(nil, profileDelegate{}, 80, 20)
+	sessionList := list.New(nil, sessionDelegate{}, 80, 20)
 	return Model{
 		state:       viewAgents,
 		cfg:         config.Config{AgentPaths: map[string]string{}},
 		agentList:   agentList,
 		profileList: profileList,
+		sessionList: sessionList,
 		marked:      map[string]bool{},
 		width:       80,
 		height:      24,
@@ -119,5 +121,51 @@ func TestSelectAgentAlwaysShowsProfileList(t *testing.T) {
 	names := []string{items[0].(profileItem).name, items[1].(profileItem).name}
 	if names[0] != "Default" || names[1] != "personal" {
 		t.Fatalf("profile names = %v, want [Default personal]", names)
+	}
+}
+
+// TestNewSessionSupported drives 'n' on the session list for a provider
+// that implements NewSessionStarter (claude does, confirmed against its
+// real --help output): it should open the prompt and, on submit, return a
+// non-nil tea.Cmd without erroring. The returned cmd (an ExecProcess
+// wrapper) is never invoked here — asserting it's non-nil and that no
+// validation error was set is enough to confirm the wiring is correct
+// without actually spawning the real CLI.
+func TestNewSessionSupported(t *testing.T) {
+	m := newTestModel(t, "claude")
+	p := m.agentList.Items()[0].(agentItem).provider
+	m.openAgent(p, viewAgents)
+
+	m.beginNewSession()
+	if m.state != viewNewSession {
+		t.Fatalf("state = %v, want viewNewSession", m.state)
+	}
+
+	cmd := m.submitNewSession()
+	if m.newSessionError != "" {
+		t.Fatalf("unexpected error: %s", m.newSessionError)
+	}
+	if cmd == nil {
+		t.Fatal("submitNewSession returned a nil cmd, want a tea.ExecProcess command")
+	}
+	if m.state != viewSessions {
+		t.Fatalf("state = %v, want viewSessions after starting a new session", m.state)
+	}
+}
+
+// TestNewSessionUnsupported checks a provider with no NewSessionStarter
+// (Antigravity has none) refuses cleanly with a status message, rather than
+// opening a prompt that could never succeed.
+func TestNewSessionUnsupported(t *testing.T) {
+	m := newTestModel(t, "antigravity")
+	p := m.agentList.Items()[0].(agentItem).provider
+	m.openAgent(p, viewAgents)
+
+	m.beginNewSession()
+	if m.state == viewNewSession {
+		t.Fatal("beginNewSession opened the prompt for a provider that doesn't support it")
+	}
+	if m.status == "" {
+		t.Error("expected a status message explaining new sessions aren't supported")
 	}
 }
