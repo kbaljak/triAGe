@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -34,6 +35,8 @@ const (
 	viewConfirm
 	viewSetPath
 	viewFilter
+	viewProfiles
+	viewNewProfileName
 )
 
 // confirmTarget describes what a pending delete confirmation would delete.
@@ -44,12 +47,16 @@ type confirmTarget struct {
 // Model is the root Bubble Tea model for triAGe.
 type Model struct {
 	state    viewState
-	returnTo viewState // state to go back to after a confirm/set-path dialog
+	returnTo viewState // state to go back to after a confirm/prompt dialog
 
-	cfg config.Config // loaded once at startup, rewritten as paths are set
+	cfg config.Config // loaded once at startup, rewritten as paths/profiles are set
 
 	agentList   list.Model
+	profileList list.Model
 	sessionList list.Model
+
+	profileAgentID string    // which agent's profiles are shown in profileList
+	sessionsParent viewState // where 'esc' from the session view goes back to
 
 	active      session.Provider  // provider currently open in the session view
 	allSessions []session.Session // every session for the active provider, unfiltered
@@ -61,10 +68,15 @@ type Model struct {
 
 	confirm *confirmTarget
 
-	pathInput      textinput.Model // active while state == viewSetPath
-	pathTargetID   string          // provider ID the path prompt is editing
-	pathTargetName string          // its display name, for the prompt title
-	pathError      string          // validation message shown under the input
+	newProfileInput textinput.Model // active while state == viewNewProfileName
+	newProfileError string
+
+	pathInput        textinput.Model // active while state == viewSetPath
+	pathTargetID     string          // provider ID the path prompt is editing
+	pathTargetName   string          // its display name, for the prompt title
+	pathEditProfile  string          // "" = editing the Default override; else this named profile
+	pathIsNewProfile bool            // true: finishing creation of a brand-new profile
+	pathError        string          // validation message shown under the input
 
 	status string // transient status line, replaced on the next action
 
@@ -85,6 +97,12 @@ func New() Model {
 	agentList.SetFilteringEnabled(true)
 	agentList.Styles.Title = titleStyle
 
+	profileList := list.New(nil, profileDelegate{}, 0, 0)
+	profileList.SetShowTitle(false)
+	profileList.SetShowStatusBar(false)
+	profileList.SetShowHelp(false)
+	profileList.SetFilteringEnabled(true)
+
 	sessionList := list.New(nil, sessionDelegate{}, 0, 0)
 	sessionList.SetShowTitle(false)
 	sessionList.SetShowStatusBar(false)
@@ -95,6 +113,7 @@ func New() Model {
 		state:       viewAgents,
 		cfg:         cfg,
 		agentList:   agentList,
+		profileList: profileList,
 		sessionList: sessionList,
 		marked:      map[string]bool{},
 	}
@@ -141,6 +160,43 @@ func buildAgentItems(providers []session.Provider) []list.Item {
 	return items
 }
 
+// buildProfileItems builds one row per profile configured for an agent,
+// always including "Default" — the implicit profile backed by its built-in
+// path or single-path override — first.
+func buildProfileItems(agentID string, cfg config.Config) []list.Item {
+	items := make([]list.Item, 0, 1+len(cfg.Profiles[agentID]))
+	items = append(items, newProfileItem(agentID, "Default", true, cfg.AgentPaths[agentID]))
+	for _, p := range cfg.Profiles[agentID] {
+		items = append(items, newProfileItem(agentID, p.Name, false, p.Path))
+	}
+	return items
+}
+
+func newProfileItem(agentID, name string, isDefault bool, override string) profileItem {
+	p := session.NewProvider(agentID, override)
+	detected := p.Detect()
+	var sessionCount int
+	var total int64
+	var loadErr error
+	if detected {
+		sessions, err := p.ListSessions()
+		loadErr = err
+		sessionCount = len(sessions)
+		for _, s := range sessions {
+			total += s.SizeBytes
+		}
+	}
+	return profileItem{
+		provider:     p,
+		name:         name,
+		isDefault:    isDefault,
+		detected:     detected,
+		sessionCount: sessionCount,
+		totalSize:    total,
+		loadErr:      loadErr,
+	}
+}
+
 func (m Model) Init() tea.Cmd { return nil }
 
 // resumeFinishedMsg arrives after tea.ExecProcess hands control back from
@@ -156,6 +212,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		listW, listH := m.listSize()
 		m.agentList.SetSize(listW, listH)
+		m.profileList.SetSize(listW, listH)
 		m.sessionList.SetSize(listW, listH)
 		return m, nil
 
@@ -174,12 +231,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case viewAgents:
 			return m.updateAgents(msg)
+		case viewProfiles:
+			return m.updateProfiles(msg)
 		case viewSessions:
 			return m.updateSessions(msg)
 		case viewConfirm:
 			return m.updateConfirm(msg)
 		case viewSetPath:
 			return m.updateSetPath(msg)
+		case viewNewProfileName:
+			return m.updateNewProfileName(msg)
 		case viewFilter:
 			return m.updateFilter(msg)
 		}
@@ -193,10 +254,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case viewAgents:
 		m.agentList, cmd = m.agentList.Update(msg)
+	case viewProfiles:
+		m.profileList, cmd = m.profileList.Update(msg)
 	case viewSessions:
 		m.sessionList, cmd = m.sessionList.Update(msg)
 	case viewSetPath:
 		m.pathInput, cmd = m.pathInput.Update(msg)
+	case viewNewProfileName:
+		m.newProfileInput, cmd = m.newProfileInput.Update(msg)
 	case viewFilter:
 		m.filterInput, cmd = m.filterInput.Update(msg)
 	}
@@ -232,11 +297,7 @@ func (m Model) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		if !it.detected {
-			m.status = it.provider.Name() + " isn't detected — press 'p' to set its config path."
-			return m, nil
-		}
-		m.openAgent(it.provider)
+		m.selectAgent(it)
 		return m, nil
 	case "p":
 		m.beginSetPath()
@@ -252,6 +313,65 @@ func (m Model) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// selectAgent opens the profile-picker screen for the selected agent —
+// always, even when it only has the one Default profile so far. "Default"
+// shows its own detected/session-count status as a row there, same as the
+// agent list does; picking it is one extra keypress but keeps there being a
+// single, always-reachable place to both browse and create profiles.
+func (m *Model) selectAgent(it agentItem) {
+	agentID := it.provider.ID()
+	m.profileAgentID = agentID
+	m.profileList.SetItems(buildProfileItems(agentID, m.cfg))
+	m.profileList.Select(0)
+	m.state = viewProfiles
+	m.status = ""
+}
+
+func (m Model) updateProfiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.profileList.FilterState() == list.Filtering {
+		var cmd tea.Cmd
+		m.profileList, cmd = m.profileList.Update(msg)
+		return m, cmd
+	}
+
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "esc", "left", "backspace":
+		m.state = viewAgents
+		m.status = ""
+		return m, nil
+	case "enter":
+		it, ok := m.profileList.SelectedItem().(profileItem)
+		if !ok {
+			return m, nil
+		}
+		if !it.detected {
+			m.status = it.name + " isn't detected — press 'p' to set its config path."
+			return m, nil
+		}
+		m.openAgent(it.provider, viewProfiles)
+		return m, nil
+	case "n":
+		m.beginNewProfile()
+		return m, nil
+	case "p":
+		m.beginEditProfilePath()
+		return m, nil
+	case "d", "delete":
+		m.deleteSelectedProfile()
+		return m, nil
+	case "r":
+		m.reloadProfiles()
+		m.status = "Refreshed."
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.profileList, cmd = m.profileList.Update(msg)
+	return m, cmd
+}
+
 func (m Model) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.sessionList.FilterState() == list.Filtering {
 		var cmd tea.Cmd
@@ -263,7 +383,7 @@ func (m Model) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc", "left", "backspace":
-		m.state = viewAgents
+		m.state = m.sessionsParent
 		m.status = ""
 		return m, nil
 	case "enter":
@@ -307,6 +427,8 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateSetPath(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
+		m.pathEditProfile = ""
+		m.pathIsNewProfile = false
 		m.state = m.returnTo
 		return m, nil
 	case "enter":
@@ -316,6 +438,26 @@ func (m Model) updateSetPath(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.pathInput, cmd = m.pathInput.Update(msg)
 	m.pathError = ""
+	return m, cmd
+}
+
+func (m Model) updateNewProfileName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.state = m.returnTo
+		return m, nil
+	case "enter":
+		name := strings.TrimSpace(m.newProfileInput.Value())
+		if err := m.cfg.ValidateProfileName(m.profileAgentID, name); err != nil {
+			m.newProfileError = err.Error()
+			return m, nil
+		}
+		m.beginNewProfilePath(name)
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.newProfileInput, cmd = m.newProfileInput.Update(msg)
+	m.newProfileError = ""
 	return m, cmd
 }
 
@@ -336,8 +478,11 @@ func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // openAgent switches into the session view for the given provider, loading
 // (or reloading) its sessions and clearing any stale marks and filter.
-func (m *Model) openAgent(p session.Provider) {
+// parent is where 'esc' from the session view goes back to — the agent
+// list, or the profile list if that's how this agent was reached.
+func (m *Model) openAgent(p session.Provider, parent viewState) {
 	m.active = p
+	m.sessionsParent = parent
 	m.marked = map[string]bool{}
 	m.filterQuery = ""
 	m.loadSessions(p)
@@ -347,6 +492,9 @@ func (m *Model) openAgent(p session.Provider) {
 
 func (m *Model) loadSessions(p session.Provider) {
 	sessions, err := p.ListSessions()
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+	})
 	m.allSessions = sessions
 	m.applyFilter()
 	if err != nil {
@@ -412,67 +560,214 @@ func (m *Model) reloadAgents() {
 	m.agentList.SetItems(buildAgentItems(session.All(m.cfg.AgentPaths)))
 }
 
-// beginSetPath opens the path-input prompt for the highlighted agent,
-// pre-filled with its current (possibly overridden) config directory so the
-// user can tweak it rather than retype it from scratch.
+// reloadProfiles rescans every profile configured for the agent whose
+// profile list is currently open.
+func (m *Model) reloadProfiles() {
+	m.profileList.SetItems(buildProfileItems(m.profileAgentID, m.cfg))
+}
+
+// beginSetPath opens the path-input prompt for the highlighted agent's
+// Default profile, pre-filled with its current override (if any) so the
+// user can tweak it rather than retype it from scratch. Triggered by 'p' on
+// the agent list.
 func (m *Model) beginSetPath() {
 	it, ok := m.agentList.SelectedItem().(agentItem)
 	if !ok {
 		return
 	}
-	m.pathTargetID = it.provider.ID()
-	m.pathTargetName = it.provider.Name()
+	id := it.provider.ID()
+	m.startPathPrompt(id, it.provider.Name(), "", false, m.cfg.AgentPaths[id])
+	m.returnTo = viewAgents
+}
+
+// beginEditProfilePath opens the path-input prompt for the highlighted
+// profile (Default or a named one) on the profile list. Triggered by 'p'
+// there.
+func (m *Model) beginEditProfilePath() {
+	it, ok := m.profileList.SelectedItem().(profileItem)
+	if !ok {
+		return
+	}
+	agentID := m.profileAgentID
+	if it.isDefault {
+		m.startPathPrompt(agentID, it.provider.Name(), "", false, m.cfg.AgentPaths[agentID])
+	} else {
+		m.startPathPrompt(agentID, it.provider.Name(), it.name, false, it.provider.Home())
+	}
+	m.returnTo = viewProfiles
+}
+
+// beginNewProfile starts the two-step "add a profile" flow: a name prompt
+// first (this one), then the path prompt (beginNewProfilePath). Assumes
+// m.profileAgentID is already set.
+func (m *Model) beginNewProfile() {
+	ti := textinput.New()
+	ti.Placeholder = "e.g. personal"
+	ti.Focus()
+	ti.CharLimit = 100
+	ti.Width = 40
+	m.newProfileInput = ti
+	m.newProfileError = ""
+	m.returnTo = viewProfiles
+	m.state = viewNewProfileName
+}
+
+// beginNewProfilePath is step two of adding a profile: name is already
+// validated, now ask where its config directory should be.
+func (m *Model) beginNewProfilePath(name string) {
+	agentID := m.profileAgentID
+	agentName := session.NewProvider(agentID, "").Name()
+	m.startPathPrompt(agentID, agentName, name, true, "")
+	m.returnTo = viewProfiles
+}
+
+// startPathPrompt sets up the shared path-input dialog used for all three
+// path-entry flows: editing the Default override, editing a named
+// profile's path, and finishing a new profile's creation. profileName is
+// "" for Default; isNew means this is finishing a brand-new profile named
+// profileName, not yet saved.
+func (m *Model) startPathPrompt(agentID, agentName, profileName string, isNew bool, current string) {
+	m.pathTargetID = agentID
+	m.pathTargetName = agentName
+	m.pathEditProfile = profileName
+	m.pathIsNewProfile = isNew
 	m.pathError = ""
 
 	ti := textinput.New()
-	ti.Placeholder = "e.g. ~/.claude or /custom/path — empty clears the override"
-	ti.SetValue(m.cfg.AgentPaths[m.pathTargetID])
+	if isNew {
+		ti.Placeholder = "e.g. ~/.claude-personal — created if missing, used as-is if it exists"
+	} else {
+		ti.Placeholder = "e.g. ~/.claude or /custom/path — empty clears the override"
+	}
+	ti.SetValue(current)
 	ti.CursorEnd()
 	ti.Focus()
 	ti.CharLimit = 4096
 	ti.Width = 60
 	m.pathInput = ti
 
-	m.returnTo = m.state
 	m.state = viewSetPath
 }
 
-// submitSetPath validates and saves the path currently typed into
-// m.pathInput, or — if it's empty — clears any existing override so the
-// agent falls back to its built-in default.
+// submitSetPath validates the path typed into m.pathInput and saves it,
+// branching on which of the three path-entry flows is active (see
+// startPathPrompt).
 func (m *Model) submitSetPath() {
 	raw := strings.TrimSpace(m.pathInput.Value())
 
-	if raw == "" {
-		delete(m.cfg.AgentPaths, m.pathTargetID)
-	} else {
-		path := expandHome(raw)
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
+	switch {
+	case m.pathIsNewProfile:
+		if raw == "" {
+			m.pathError = "path can't be empty"
+			return
 		}
-		fi, err := os.Stat(path)
+		path, err := resolveAndEnsureDir(raw)
 		if err != nil {
-			m.pathError = "can't find " + path
+			m.pathError = err.Error()
 			return
 		}
-		if !fi.IsDir() {
-			m.pathError = path + " isn't a directory"
+		if err := m.cfg.AddProfile(m.pathTargetID, m.pathEditProfile, path); err != nil {
+			m.pathError = err.Error()
 			return
 		}
-		if m.cfg.AgentPaths == nil {
-			m.cfg.AgentPaths = map[string]string{}
+		if err := m.cfg.Save(); err != nil {
+			m.pathError = "couldn't save config: " + err.Error()
+			return
 		}
-		m.cfg.AgentPaths[m.pathTargetID] = path
+		m.status = fmt.Sprintf("Added profile %q for %s.", m.pathEditProfile, m.pathTargetName)
+		m.reloadProfiles()
+
+	case m.pathEditProfile != "":
+		if raw == "" {
+			m.pathError = "path can't be empty — delete the profile instead to remove it"
+			return
+		}
+		path, err := resolveAndEnsureDir(raw)
+		if err != nil {
+			m.pathError = err.Error()
+			return
+		}
+		m.cfg.SetProfilePath(m.pathTargetID, m.pathEditProfile, path)
+		if err := m.cfg.Save(); err != nil {
+			m.pathError = "couldn't save config: " + err.Error()
+			return
+		}
+		m.status = fmt.Sprintf("Updated path for %q.", m.pathEditProfile)
+		m.reloadProfiles()
+
+	default:
+		if raw == "" {
+			delete(m.cfg.AgentPaths, m.pathTargetID)
+		} else {
+			path, err := resolveAndEnsureDir(raw)
+			if err != nil {
+				m.pathError = err.Error()
+				return
+			}
+			if m.cfg.AgentPaths == nil {
+				m.cfg.AgentPaths = map[string]string{}
+			}
+			m.cfg.AgentPaths[m.pathTargetID] = path
+		}
+		if err := m.cfg.Save(); err != nil {
+			m.pathError = "couldn't save config: " + err.Error()
+			return
+		}
+		m.status = "Updated config path for " + m.pathTargetName + "."
+		m.reloadAgents()
+		if m.returnTo == viewProfiles {
+			m.reloadProfiles()
+		}
 	}
 
-	if err := m.cfg.Save(); err != nil {
-		m.pathError = "couldn't save config: " + err.Error()
+	m.pathEditProfile = ""
+	m.pathIsNewProfile = false
+	m.state = m.returnTo
+}
+
+// deleteSelectedProfile removes the highlighted named profile (never the
+// Default one) from config. No confirmation dialog: this only forgets a
+// config pointer, it never touches the agent's actual files or sessions.
+func (m *Model) deleteSelectedProfile() {
+	it, ok := m.profileList.SelectedItem().(profileItem)
+	if !ok {
 		return
 	}
+	if it.isDefault {
+		m.status = errorStyle.Render("Can't delete the default profile.")
+		return
+	}
+	m.cfg.DeleteProfile(m.profileAgentID, it.name)
+	if err := m.cfg.Save(); err != nil {
+		m.status = errorStyle.Render("Couldn't save config: " + err.Error())
+		return
+	}
+	m.status = fmt.Sprintf("Deleted profile %q.", it.name)
+	m.reloadProfiles()
+}
 
-	m.reloadAgents()
-	m.status = "Updated config path for " + m.pathTargetName + "."
-	m.state = m.returnTo
+// resolveAndEnsureDir expands a leading "~", makes the path absolute, and
+// creates the directory if it doesn't exist yet; a path that already
+// exists is used as-is, after confirming it's actually a directory.
+func resolveAndEnsureDir(raw string) (string, error) {
+	path := expandHome(raw)
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	fi, err := os.Stat(path)
+	if err == nil {
+		if !fi.IsDir() {
+			return "", fmt.Errorf("%s isn't a directory", path)
+		}
+		return path, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return "", fmt.Errorf("couldn't create %s: %w", path, err)
+	}
+	return path, nil
 }
 
 // expandHome expands a leading "~" the way a shell would, since textinput
@@ -514,19 +809,35 @@ func (m *Model) beginResume() tea.Cmd {
 		m.status = errorStyle.Render("Can't resume: " + err.Error())
 		return nil
 	}
-	if _, err := exec.LookPath(argv[0]); err != nil {
-		m.status = errorStyle.Render(fmt.Sprintf("%q isn't on your PATH: %v", argv[0], err))
+	cmd, err := m.buildAgentCmd(argv, dir)
+	if err != nil {
+		m.status = errorStyle.Render(err.Error())
 		return nil
-	}
-
-	cmd := exec.Command(argv[0], argv[1:]...)
-	if dir != "" {
-		cmd.Dir = dir
 	}
 	title := si.sess.Title
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return resumeFinishedMsg{sessionTitle: title, err: err}
 	})
+}
+
+// buildAgentCmd resolves argv[0] on PATH and builds the *exec.Cmd to run
+// it, scoped to the active provider's own profile via its env var if it has
+// one (EnvHomeProvider) — without that, launching under a non-default
+// profile would run the real CLI against its own default home instead of
+// the profile actually being browsed.
+func (m *Model) buildAgentCmd(argv []string, dir string) (*exec.Cmd, error) {
+	if _, err := exec.LookPath(argv[0]); err != nil {
+		return nil, fmt.Errorf("%q isn't on your PATH: %w", argv[0], err)
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	if eh, ok := m.active.(session.EnvHomeProvider); ok {
+		name, value := eh.HomeEnv()
+		cmd.Env = append(os.Environ(), name+"="+value)
+	}
+	return cmd, nil
 }
 
 func (m *Model) toggleMark() tea.Cmd {
@@ -598,8 +909,12 @@ func (m Model) View() string {
 		return m.viewConfirmDialog()
 	case viewSetPath:
 		return m.viewSetPathDialog()
+	case viewNewProfileName:
+		return m.viewNewProfileDialog()
 	case viewFilter:
 		return m.viewFilterDialog()
+	case viewProfiles:
+		return m.viewProfilesScreen()
 	case viewSessions:
 		return m.viewSessions()
 	default:
@@ -610,7 +925,16 @@ func (m Model) View() string {
 func (m Model) viewAgents() string {
 	title := brandBar("AI agents on " + hostname)
 	body := m.agentList.View()
-	help := helpStyle.Render("↑/↓ move · enter open · p set path · r refresh · / filter · q quit")
+	help := helpStyle.Render("↑/↓ move · enter choose profile · p set path · r refresh · / filter · q quit")
+	status := statusBarStyle.Width(max(m.width, 1)).Render(m.status)
+	return lipgloss.JoinVertical(lipgloss.Left, title, body, help, status)
+}
+
+func (m Model) viewProfilesScreen() string {
+	name := session.NewProvider(m.profileAgentID, "").Name()
+	title := brandBar(name + " profiles")
+	body := m.profileList.View()
+	help := helpStyle.Render("↑/↓ move · enter open · n new profile · p set path · d delete · r refresh · esc back · q quit")
 	status := statusBarStyle.Width(max(m.width, 1)).Render(m.status)
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, help, status)
 }
@@ -657,8 +981,16 @@ func (m Model) viewConfirmDialog() string {
 }
 
 func (m Model) viewSetPathDialog() string {
+	title := "Set config path — " + m.pathTargetName
+	switch {
+	case m.pathIsNewProfile:
+		title = fmt.Sprintf("New profile %q — path for %s", m.pathEditProfile, m.pathTargetName)
+	case m.pathEditProfile != "":
+		title = fmt.Sprintf("Set path — %s %q", m.pathTargetName, m.pathEditProfile)
+	}
+
 	lines := []string{
-		promptTitleStyle.Render("Set config path — " + m.pathTargetName),
+		promptTitleStyle.Render(title),
 		"",
 		m.pathInput.View(),
 	}
@@ -666,6 +998,22 @@ func (m Model) viewSetPathDialog() string {
 		lines = append(lines, "", errorStyle.Render(m.pathError))
 	}
 	lines = append(lines, "", helpStyle.Render("enter save · esc cancel"))
+
+	dialog := promptBorderStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) viewNewProfileDialog() string {
+	agentName := session.NewProvider(m.profileAgentID, "").Name()
+	lines := []string{
+		promptTitleStyle.Render("New profile name — " + agentName),
+		"",
+		m.newProfileInput.View(),
+	}
+	if m.newProfileError != "" {
+		lines = append(lines, "", errorStyle.Render(m.newProfileError))
+	}
+	lines = append(lines, "", helpStyle.Render("enter continue · esc cancel"))
 
 	dialog := promptBorderStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, dialog)

@@ -31,6 +31,7 @@ func NewGeminiProvider(override string) *GeminiProvider {
 
 func (p *GeminiProvider) ID() string   { return "gemini" }
 func (p *GeminiProvider) Name() string { return "Gemini CLI" }
+func (p *GeminiProvider) Home() string { return p.home }
 
 func (p *GeminiProvider) Detect() bool {
 	return dirExists(filepath.Join(p.home, "tmp"))
@@ -116,3 +117,7 @@ func (p *GeminiProvider) DeleteSession(s Session) error {
 func (p *GeminiProvider) ResumeCommand(s Session) ([]string, string, error) {
 	return []string{"gemini", "--resume", s.ID}, "", nil
 }
+
+// HomeEnv reports GEMINI_CLI_HOME, the documented env var Gemini CLI reads
+// to relocate its user-level config/storage root.
+func (p *GeminiProvider) HomeEnv() (string, string) { return "GEMINI_CLI_HOME", p.home }

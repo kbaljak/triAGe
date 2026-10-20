@@ -24,6 +24,7 @@ func NewClaudeProvider(override string) *ClaudeProvider {
 
 func (p *ClaudeProvider) ID() string   { return "claude" }
 func (p *ClaudeProvider) Name() string { return "Claude Code" }
+func (p *ClaudeProvider) Home() string { return p.home }
 
 func (p *ClaudeProvider) Detect() bool {
 	return dirExists(p.home)
@@ -93,6 +94,10 @@ func (p *ClaudeProvider) ResumeCommand(s Session) ([]string, string, error) {
 	}
 	return []string{"claude", "--resume", s.ID}, dir, nil
 }
+
+// HomeEnv reports CLAUDE_CONFIG_DIR, the documented env var Claude Code
+// reads to relocate its entire config directory.
+func (p *ClaudeProvider) HomeEnv() (string, string) { return "CLAUDE_CONFIG_DIR", p.home }
 
 // extractClaudeMeta streams a session transcript line by line (never
 // loading the whole file, since transcripts can hold multi-megabyte tool
