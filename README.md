@@ -44,13 +44,25 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 | Key | Action |
 |---|---|
 | `↑`/`↓`, `j`/`k` | Move |
-| `enter` | Open the selected agent's sessions |
-| `p` | Set (or clear) a custom config path for the selected agent |
+| `enter` | Choose which profile to open (always — "Default" is one of the choices) |
+| `p` | Set (or clear) the Default profile's config path |
 | `r` | Re-scan every agent |
 | `/` | Filter agents |
 | `q`, `ctrl+c` | Quit |
 
-**Session list**
+**Profile list** (shown for every agent — "Default" is always the first entry)
+| Key | Action |
+|---|---|
+| `↑`/`↓`, `j`/`k` | Move |
+| `enter` | Open that profile's sessions |
+| `n` | Add a new profile |
+| `p` | Set the highlighted profile's config path |
+| `d`, `delete` | Delete the highlighted profile (not Default) |
+| `r` | Re-scan this agent's profiles |
+| `esc`, `backspace`, `←` | Back to the agent list |
+| `q`, `ctrl+c` | Quit |
+
+**Session list** (sorted newest-first by last activity)
 | Key | Action |
 |---|---|
 | `↑`/`↓`, `j`/`k` | Move |
@@ -89,21 +101,46 @@ narrowed down to.
 | `y`, `enter` | Confirm — permanently deletes the file(s), cannot be undone |
 | `n`, `esc` | Cancel |
 
-## Agents installed somewhere nonstandard
+## Profiles
 
-triAGe looks for each agent at its usual default location. If an agent
-isn't found there — including if none are found at all on first run —
-its row in the agent list shows "not detected" instead of a session count.
-Highlight it and press `p` to type in the actual path to its config
-directory (the same directory it would otherwise look for by default, e.g.
-`~/.claude` for Claude Code); leaving the prompt empty and pressing enter
-clears a path you'd previously set, reverting to the default. This works
-for any agent, not just undetected ones — useful if you want to point at a
-different install than the default.
+Selecting an agent always opens its profile list first. Every agent has an
+implicit **Default** profile there: its usual config directory (e.g.
+`~/.claude` for Claude Code), or a single override set with `p` on the
+agent list. If an agent isn't found there — including if none are found at
+all on first run — its row shows "not detected" instead of a session
+count; `p` (on either screen) points it at the real location.
 
-Paths are saved to a config file (`os.UserConfigDir()/triage/config.json` —
-typically `~/.config/triage/config.json` on Linux) and reused on the next
-launch.
+Add more named profiles (e.g. a "work" and a "personal" one, each a
+separate account's config directory) with `n` on the profile list.
+
+Entering a path that doesn't exist yet creates it; an existing path is used
+as-is. All of this is saved to a config file
+(`os.UserConfigDir()/triage/config.json` — typically
+`~/.config/triage/config.json` on Linux) and reused on the next launch.
+
+Creating a profile only creates an empty directory — triAGe has no way to
+(and shouldn't try to) set up real credentials or config in it, since only
+the actual agent CLI can do its own first-run authentication. A brand-new
+profile shows zero sessions until the real CLI has actually run there once
+(e.g. by running it yourself with its config-dir environment variable set
+to the profile's path — see the table below).
+
+**Resuming under a non-default profile** sets the real agent CLI's own
+config-directory environment variable before launching it, so it resumes
+against that profile's actual account and data — not whichever one happens
+to be the CLI's own default:
+
+| Agent | Env var |
+|---|---|
+| Claude Code | `CLAUDE_CONFIG_DIR` |
+| Codex (OpenAI) | `CODEX_HOME` |
+| Gemini CLI | `GEMINI_CLI_HOME` |
+| GitHub Copilot CLI | `COPILOT_HOME` |
+| Grok Build (xAI) | `GROK_HOME` |
+
+Antigravity has no such variable and doesn't support resuming from triAGe
+at all — profiles for it only control which directory gets scanned for
+listing.
 
 ## Supported agents
 
@@ -124,11 +161,14 @@ something's off, please open an issue with what you saw.
 ## Adding another agent
 
 Implement `session.Provider` (see `internal/session/session.go`) in a new
-file under `internal/session/`, then add it to `session.All()` in
+file under `internal/session/`, then add its ID to `session.IDs` in
 `internal/session/registry.go` (use `resolveHome` from `util.go` so it
-supports a custom-path override like every other provider). Also implement
-`session.Resumable` on it if the agent has a real "resume by session ID"
-CLI command. No change needed to `internal/ui`.
+supports a custom-path override like every other provider, and implement
+`Home()` to expose it). Also implement, if the agent's CLI supports them:
+`session.Resumable` (a real "resume by session ID" command), and
+`session.EnvHomeProvider` (an environment variable that relocates its
+config directory, so profiles resume correctly). No change needed to
+`internal/ui`.
 
 ## Development
 

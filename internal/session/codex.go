@@ -36,6 +36,7 @@ func NewCodexProvider(override string) *CodexProvider {
 
 func (p *CodexProvider) ID() string   { return "codex" }
 func (p *CodexProvider) Name() string { return "Codex (OpenAI)" }
+func (p *CodexProvider) Home() string { return p.home }
 
 func (p *CodexProvider) Detect() bool {
 	return dirExists(filepath.Join(p.home, "sessions"))
@@ -140,6 +141,10 @@ func (p *CodexProvider) ResumeCommand(s Session) ([]string, string, error) {
 	}
 	return []string{"codex", "resume", s.ID}, dir, nil
 }
+
+// HomeEnv reports CODEX_HOME, the documented env var Codex CLI reads to
+// relocate its config/state root (config, auth, logs, sessions).
+func (p *CodexProvider) HomeEnv() (string, string) { return "CODEX_HOME", p.home }
 
 type codexMeta struct {
 	sessionID string

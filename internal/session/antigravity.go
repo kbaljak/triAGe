@@ -26,6 +26,7 @@ func NewAntigravityProvider(override string) *AntigravityProvider {
 
 func (p *AntigravityProvider) ID() string   { return "antigravity" }
 func (p *AntigravityProvider) Name() string { return "Antigravity" }
+func (p *AntigravityProvider) Home() string { return p.home }
 
 func (p *AntigravityProvider) Detect() bool {
 	return dirExists(p.home)

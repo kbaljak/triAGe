@@ -28,6 +28,7 @@ func NewCopilotProvider(override string) *CopilotProvider {
 
 func (p *CopilotProvider) ID() string   { return "copilot" }
 func (p *CopilotProvider) Name() string { return "GitHub Copilot CLI" }
+func (p *CopilotProvider) Home() string { return p.home }
 
 func (p *CopilotProvider) Detect() bool {
 	return dirExists(p.home)
@@ -105,3 +106,7 @@ func (p *CopilotProvider) ResumeCommand(s Session) ([]string, string, error) {
 	}
 	return []string{"copilot", "--resume", s.ID}, dir, nil
 }
+
+// HomeEnv reports COPILOT_HOME, the documented env var Copilot CLI reads to
+// relocate its config directory (replaces the deprecated --config-dir flag).
+func (p *CopilotProvider) HomeEnv() (string, string) { return "COPILOT_HOME", p.home }

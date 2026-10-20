@@ -28,6 +28,7 @@ func NewGrokProvider(override string) *GrokProvider {
 
 func (p *GrokProvider) ID() string   { return "grok" }
 func (p *GrokProvider) Name() string { return "Grok Build (xAI)" }
+func (p *GrokProvider) Home() string { return p.home }
 
 func (p *GrokProvider) Detect() bool {
 	return dirExists(filepath.Join(p.home, "sessions"))
@@ -119,3 +120,7 @@ func (p *GrokProvider) ResumeCommand(s Session) ([]string, string, error) {
 	}
 	return []string{"grok", "--resume", s.ID}, dir, nil
 }
+
+// HomeEnv reports GROK_HOME, the env var Grok Build reads to relocate its
+// whole ~/.grok tree.
+func (p *GrokProvider) HomeEnv() (string, string) { return "GROK_HOME", p.home }
