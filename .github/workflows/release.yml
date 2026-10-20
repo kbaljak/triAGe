@@ -1,9 +1,14 @@
 name: Release
 
 # Builds a static triage binary for each OS/arch below and attaches it to a
-# GitHub Release whenever a version tag (v1.2.3) is pushed. Each matrix leg
-# builds and uploads independently, appending its own archive to the same
-# (auto-created) release.
+# GitHub Release whenever a version tag (v1.2.3) is pushed. The release
+# (and its auto-generated notes) is created once by create-release; each
+# matrix leg then only attaches its own archive to that existing release.
+#
+# generate_release_notes must run exactly once: softprops/action-gh-release
+# prepends newly-generated notes to whatever body the release already has,
+# so calling it with generate_release_notes: true from every matrix leg
+# compounds the notes once per leg instead of writing them once.
 on:
   push:
     tags:
@@ -13,7 +18,16 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release with generated notes
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
   release:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -48,4 +62,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: triage_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
-          generate_release_notes: true
