@@ -41,8 +41,17 @@ const (
 )
 
 // confirmTarget describes what a pending delete confirmation would delete.
+// Exactly one of the two fields is set.
 type confirmTarget struct {
 	sessions []session.Session
+	profile  *profileDeleteTarget
+}
+
+// profileDeleteTarget names the named profile a pending confirmation would
+// remove from config.
+type profileDeleteTarget struct {
+	agentID string
+	name    string
 }
 
 // Model is the root Bubble Tea model for triAGe.
@@ -384,7 +393,7 @@ func (m Model) updateProfiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.beginEditProfilePath()
 		return m, nil
 	case "d", "delete":
-		m.deleteSelectedProfile()
+		m.beginDeleteProfile()
 		return m, nil
 	case "r":
 		m.reloadProfiles()
@@ -440,7 +449,11 @@ func (m Model) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y", "enter":
-		m.performDelete()
+		if m.confirm != nil && m.confirm.profile != nil {
+			m.performDeleteProfile()
+		} else {
+			m.performDelete()
+		}
 		m.state = m.returnTo
 		return m, nil
 	case "n", "N", "esc", "q", "ctrl+c":
@@ -767,10 +780,12 @@ func (m *Model) submitSetPath() {
 	m.state = m.returnTo
 }
 
-// deleteSelectedProfile removes the highlighted named profile (never the
-// Default one) from config. No confirmation dialog: this only forgets a
-// config pointer, it never touches the agent's actual files or sessions.
-func (m *Model) deleteSelectedProfile() {
+// beginDeleteProfile opens a confirmation dialog for the highlighted named
+// profile (never the Default one). A stray 'd' keypress used to delete a
+// profile's saved config pointer immediately — this confirms first, same as
+// session deletion, even though the only thing at stake is that saved
+// pointer (the agent's actual files on disk are never touched).
+func (m *Model) beginDeleteProfile() {
 	it, ok := m.profileList.SelectedItem().(profileItem)
 	if !ok {
 		return
@@ -779,12 +794,24 @@ func (m *Model) deleteSelectedProfile() {
 		m.status = errorStyle.Render("Can't delete the default profile.")
 		return
 	}
-	m.cfg.DeleteProfile(m.profileAgentID, it.name)
-	if err := m.cfg.Save(); err != nil {
-		m.status = errorStyle.Render("Couldn't save config: " + err.Error())
+	m.confirm = &confirmTarget{profile: &profileDeleteTarget{agentID: m.profileAgentID, name: it.name}}
+	m.returnTo = viewProfiles
+	m.state = viewConfirm
+}
+
+// performDeleteProfile actually removes the confirmed profile from config.
+func (m *Model) performDeleteProfile() {
+	if m.confirm == nil || m.confirm.profile == nil {
 		return
 	}
-	m.status = fmt.Sprintf("Deleted profile %q.", it.name)
+	target := m.confirm.profile
+	m.cfg.DeleteProfile(target.agentID, target.name)
+	if err := m.cfg.Save(); err != nil {
+		m.status = errorStyle.Render("Couldn't save config: " + err.Error())
+	} else {
+		m.status = fmt.Sprintf("Deleted profile %q.", target.name)
+	}
+	m.confirm = nil
 	m.reloadProfiles()
 }
 
@@ -1054,9 +1081,10 @@ func (m Model) viewConfirmDialog() string {
 	if m.confirm == nil {
 		return ""
 	}
-	n := len(m.confirm.sessions)
 	var body string
-	if n == 1 {
+	if p := m.confirm.profile; p != nil {
+		body = fmt.Sprintf("Delete profile %q?\n\nThis only forgets triAGe's saved path for it — the directory and its contents stay on disk.", p.name)
+	} else if n := len(m.confirm.sessions); n == 1 {
 		s := m.confirm.sessions[0]
 		body = fmt.Sprintf("Delete this session?\n\n  %s\n  %s\n\nThis permanently removes it from disk and cannot be undone.",
 			s.Title, s.Project)

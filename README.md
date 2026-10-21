@@ -57,7 +57,7 @@ make install   # installs to ~/.local/bin (override with PREFIX=...)
 | `enter` | Open that profile's sessions |
 | `n` | Add a new profile |
 | `p` | Set the highlighted profile's config path |
-| `d`, `delete` | Delete the highlighted profile (not Default) |
+| `d`, `delete` | Delete the highlighted profile (not Default) — asks to confirm first |
 | `r` | Re-scan this agent's profiles |
 | `esc`, `backspace`, `←` | Back to the agent list |
 | `q`, `ctrl+c` | Quit |

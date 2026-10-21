@@ -124,6 +124,54 @@ func TestSelectAgentAlwaysShowsProfileList(t *testing.T) {
 	}
 }
 
+// TestDeleteProfileRequiresConfirmation locks in that 'd' on the profile
+// list no longer deletes immediately — an unintended keypress used to
+// discard a profile's saved config pointer with no way back. It must open
+// the same confirm dialog sessions use, do nothing on cancel, and only
+// delete on explicit confirmation.
+func TestDeleteProfileRequiresConfirmation(t *testing.T) {
+	m := newTestModel(t, "codex")
+	if err := m.cfg.AddProfile("codex", "personal", t.TempDir()); err != nil {
+		t.Fatalf("AddProfile: %v", err)
+	}
+	m.profileAgentID = "codex"
+	m.profileList.SetItems(buildProfileItems("codex", m.cfg))
+	m.profileList.Select(1) // [Default, personal]
+	m.state = viewProfiles
+
+	// 'd' opens a confirmation instead of deleting right away.
+	mi, _ := m.Update(key("d"))
+	m = mi.(Model)
+	if m.state != viewConfirm {
+		t.Fatalf("state = %v, want viewConfirm", m.state)
+	}
+	if len(m.cfg.Profiles["codex"]) != 1 {
+		t.Fatalf("profile was deleted before confirmation: %+v", m.cfg.Profiles["codex"])
+	}
+
+	// Cancelling leaves the profile alone.
+	mi, _ = m.Update(key("esc"))
+	m = mi.(Model)
+	if m.state != viewProfiles {
+		t.Fatalf("state = %v, want viewProfiles after cancelling", m.state)
+	}
+	if len(m.cfg.Profiles["codex"]) != 1 {
+		t.Fatalf("profile was deleted on cancel: %+v", m.cfg.Profiles["codex"])
+	}
+
+	// Confirming actually deletes it.
+	mi, _ = m.Update(key("d"))
+	m = mi.(Model)
+	mi, _ = m.Update(key("enter"))
+	m = mi.(Model)
+	if m.state != viewProfiles {
+		t.Fatalf("state = %v, want viewProfiles after confirming", m.state)
+	}
+	if len(m.cfg.Profiles["codex"]) != 0 {
+		t.Fatalf("profile still present after confirming delete: %+v", m.cfg.Profiles["codex"])
+	}
+}
+
 // TestNewSessionSupported drives 'n' on the session list for a provider
 // that implements NewSessionStarter (claude does, confirmed against its
 // real --help output): it should open the prompt and, on submit, return a
