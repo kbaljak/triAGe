@@ -185,28 +185,18 @@ func buildProfileItems(agentID string, cfg config.Config) []list.Item {
 	return items
 }
 
+// newProfileItem only checks Detect() (a cheap directory-existence check) —
+// it deliberately doesn't call ListSessions() to show a count/size here, as
+// that would mean a full scan per profile just to render the picker, on
+// every profile whether or not it's the one about to be opened. The real
+// count shows up the moment a profile is actually opened (loadSessions).
 func newProfileItem(agentID, name string, isDefault bool, override string) profileItem {
 	p := session.NewProvider(agentID, override)
-	detected := p.Detect()
-	var sessionCount int
-	var total int64
-	var loadErr error
-	if detected {
-		sessions, err := p.ListSessions()
-		loadErr = err
-		sessionCount = len(sessions)
-		for _, s := range sessions {
-			total += s.SizeBytes
-		}
-	}
 	return profileItem{
-		provider:     p,
-		name:         name,
-		isDefault:    isDefault,
-		detected:     detected,
-		sessionCount: sessionCount,
-		totalSize:    total,
-		loadErr:      loadErr,
+		provider:  p,
+		name:      name,
+		isDefault: isDefault,
+		detected:  p.Detect(),
 	}
 }
 

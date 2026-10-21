@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"io"
 	"strings"
 
@@ -15,19 +14,18 @@ import (
 // directory for that agent (always including "Default", the implicit
 // profile backed by the agent's built-in path or its single-path override).
 type profileItem struct {
-	provider     session.Provider
-	name         string
-	isDefault    bool // the built-in profile — can't be deleted
-	detected     bool
-	sessionCount int
-	totalSize    int64
-	loadErr      error
+	provider  session.Provider
+	name      string
+	isDefault bool // the built-in profile — can't be deleted
+	detected  bool
 }
 
 func (i profileItem) FilterValue() string { return i.name }
 
-// profileDelegate renders profileItem rows: name, session count/status, and
-// the resolved directory it reads from.
+// profileDelegate renders profileItem rows: name, detected status, and the
+// resolved directory it reads from. Deliberately no session count/size here
+// — that would mean a full session scan per profile just to render the
+// picker; the real count shows up once a profile is actually opened.
 type profileDelegate struct{}
 
 func (d profileDelegate) Height() int                             { return 2 }
@@ -60,26 +58,12 @@ func (d profileDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 		name += " (default)"
 	}
 
-	// Each case below renders its own complete, self-contained style span
-	// (own start + reset) rather than nesting inside a shared outer style —
-	// an inner reset code would otherwise cut an outer span short.
-	var status string
-	switch {
-	case !it.detected:
-		status = notInstalledStyle.Render("not detected")
-	case it.loadErr != nil:
-		status = errorStyle.Render("error: " + it.loadErr.Error())
-	case it.sessionCount == 0:
-		status = notInstalledStyle.Render("no sessions found")
-	default:
-		plural := "s"
-		if it.sessionCount == 1 {
-			plural = ""
-		}
-		status = metaStyle.Render(fmt.Sprintf("%d session%s · %s on disk", it.sessionCount, plural, formatBytes(it.totalSize)))
+	line2 := "    "
+	if !it.detected {
+		line2 += notInstalledStyle.Render("not detected") + metaStyle.Render(" · ")
 	}
+	line2 += metaStyle.Render(it.provider.Home())
 
 	line1 := cursor + nameStyle.Render(name)
-	line2 := "    " + status + metaStyle.Render(" · "+it.provider.Home())
-	fmt.Fprint(w, strings.Join([]string{line1, line2}, "\n"))
+	io.WriteString(w, strings.Join([]string{line1, line2}, "\n"))
 }
